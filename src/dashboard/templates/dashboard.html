@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h1 class="page-title">
+  <span class="live-dot"></span>Dashboard — Monitoring IoT
+</h1>
+
+<!-- KPIs -->
+<div class="kpi-grid">
+  <div class="kpi-card critical">
+    <div class="kpi-label">Alertes critiques</div>
+    <div class="kpi-value">{{ stats.critical }}</div>
+    <div class="kpi-sub">{{ open.critical }} ouvertes</div>
+  </div>
+  <div class="kpi-card warning">
+    <div class="kpi-label">Avertissements</div>
+    <div class="kpi-value">{{ stats.warning }}</div>
+    <div class="kpi-sub">{{ open.warning }} ouvertes</div>
+  </div>
+  <div class="kpi-card success">
+    <div class="kpi-label">Résolues</div>
+    <div class="kpi-value">{{ stats.resolved }}</div>
+    <div class="kpi-sub">sur {{ stats.total }} au total</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Acquittées</div>
+    <div class="kpi-value">{{ stats.acknowledged }}</div>
+    <div class="kpi-sub">opérateur notifié</div>
+  </div>
+</div>
+
+<!-- Graphiques -->
+<div class="chart-grid">
+  <div class="chart-card">
+    <div class="chart-title">Répartition des alertes</div>
+    <div class="chart-wrap"><canvas id="chartPie"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Capteurs — dernières lectures</div>
+    <div class="chart-wrap"><canvas id="chartBar"></canvas></div>
+  </div>
+</div>
+
+<!-- Alertes ouvertes récentes -->
+<div class="card">
+  <div class="card-header">
+    <h3>🔔 Alertes ouvertes récentes</h3>
+    <a href="/alerts" class="btn btn-outline btn-sm">Voir tout</a>
+  </div>
+  <div class="card-body">
+    {% if recent_alerts %}
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau</th><th>Méthode</th><th>Raison</th><th>Date</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in recent_alerts %}
+        <tr>
+          <td>{{ a.id }}</td>
+          <td><b>{{ a.sensor }}</b></td>
+          <td>{{ a.value }} {{ a.unit }}</td>
+          <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
+          <td>{{ a.method }}</td>
+          <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
+          <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.created_at[:19] | replace('T',' ') }}</td>
+          <td style="white-space:nowrap;">
+            {% if not a.acknowledged %}
+            <button class="btn btn-sm btn-outline" onclick="ackAlert({{ a.id }}, this)">Acquitter</button>
+            {% endif %}
+            <button class="btn btn-sm btn-success" onclick="resolveAlert({{ a.id }}, this)">Résoudre</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">✅ Aucune alerte ouverte</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// Graphique Donut — répartition
+new Chart(document.getElementById('chartPie'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Normal (résolus)', 'Warning', 'Critical'],
+    datasets: [{
+      data: [{{ stats.resolved }}, {{ stats.warning }}, {{ stats.critical }}],
+      backgroundColor: ['#27ae60', '#f39c12', '#e74c3c'],
+      borderWidth: 2,
+    }]
+  },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+});
+
+// Graphique Barres — lectures récentes par capteur (depuis l'API)
+async function loadBarChart() {
+  const r    = await fetch('/api/logs?limit=30');
+  const data = await r.json();
+  const logs = data.logs;
+
+  const sensors = ['temperature', 'turbidity', 'ph'];
+  const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+
+  const datasets = sensors.map(s => ({
+    label: s,
+    data: logs.filter(l => l.sensor === s).slice(0, 10).map(l => l.value),
+    backgroundColor: colors[s] + '99',
+    borderColor: colors[s],
+    borderWidth: 1,
+  }));
+
+  new Chart(document.getElementById('chartBar'), {
+    type: 'bar',
+    data: { labels: Array.from({length: 10}, (_, i) => `T-${9-i}`), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+}
+loadBarChart();
+
+// Actions alertes
+async function ackAlert(id, btn) {
+  await fetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' });
+  btn.disabled = true; btn.textContent = 'Acquitté';
+}
+async function resolveAlert(id, btn) {
+  await fetch(`/api/alerts/${id}/resolve`, { method: 'PATCH' });
+  btn.closest('tr').style.opacity = '.4';
+  setTimeout(() => location.reload(), 600);
+}
+
+// Auto-refresh toutes les 30s
+setTimeout(() => location.reload(), 30000);
+</script>
+{% endblock %}

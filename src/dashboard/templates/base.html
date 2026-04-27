@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}IoT Alert System{% endblock %} — INNOV/CCNB</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo"><span>🌊</span> IoT Alerts</div>
+    <div class="nav-section">Navigation</div>
+    <a href="/"       class="nav-item {% if active=='dashboard' %}active{% endif %}">📊 Dashboard</a>
+    <a href="/alerts" class="nav-item {% if active=='alerts'    %}active{% endif %}">🔔 Alertes</a>
+    <a href="/logs"   class="nav-item {% if active=='logs'      %}active{% endif %}">📋 Historique</a>
+    <div class="nav-section">API</div>
+    <a href="/docs"   class="nav-item" target="_blank">📄 Swagger UI</a>
+    <div class="nav-section">Simulateur</div>
+    <button class="nav-item btn" style="width:100%;background:rgba(255,255,255,.1);color:#fff;border:none;cursor:pointer;" onclick="triggerTick()">▶ Générer lecture</button>
+    <div id="tick-msg" style="font-size:.75rem;color:rgba(255,255,255,.7);margin:.4rem .8rem;min-height:1rem;"></div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+
+<script>
+async function triggerTick() {
+  const msg = document.getElementById('tick-msg');
+  msg.textContent = 'Génération...';
+  try {
+    const r    = await fetch('/api/simulator/tick', { method: 'POST' });
+    const data = await r.json();
+    const n    = data.alerts_created.length;
+    msg.textContent = n ? `⚠ ${n} alerte(s) créée(s)` : '✓ Aucune anomalie';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    msg.textContent = '✗ Erreur';
+  }
+}
+{% block scripts %}{% endblock %}
+</script>
+</body>
+</html>

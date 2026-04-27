@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+{% block title %}Historique{% endblock %}
+
+{% block content %}
+<h1 class="page-title">📋 Historique des lectures</h1>
+
+<!-- Filtre capteur -->
+<div class="toolbar">
+  {% for s in ['', 'temperature', 'turbidity', 'ph'] %}
+  <a href="/logs{% if s %}?sensor={{ s }}{% endif %}"
+     class="btn {% if sensor == s or (s=='' and not sensor) %}btn-primary{% else %}btn-outline{% endif %}">
+    {% if s == '' %}Tous{% elif s == 'temperature' %}🌡 Température{% elif s == 'turbidity' %}💧 Turbidité{% else %}⚗ pH{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<!-- Graphique temps réel -->
+<div class="chart-card" style="margin-bottom:1.5rem;">
+  <div class="chart-title">Évolution des valeurs — 200 dernières lectures</div>
+  <div style="position:relative;height:260px;"><canvas id="chartLine"></canvas></div>
+</div>
+
+<!-- Tableau -->
+<div class="card">
+  <div class="card-header">
+    <h3>{{ logs | length }} lecture(s)</h3>
+    <span style="font-size:.8rem;color:#999;">Affichage : 200 plus récentes</span>
+  </div>
+  <div class="card-body">
+    {% if logs %}
+    <table>
+      <thead>
+        <tr><th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau détecté</th><th>Scénario</th><th>Horodatage</th></tr>
+      </thead>
+      <tbody>
+        {% for l in logs %}
+        <tr>
+          <td>{{ l.id }}</td>
+          <td><b>{{ l.sensor }}</b></td>
+          <td>{{ l.value }} {{ l.unit }}</td>
+          <td><span class="badge badge-{{ l.level | lower }}">{{ l.level }}</span></td>
+          <td style="font-size:.78rem;color:#999;">{{ l.scenario or '—' }}</td>
+          <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ l.created_at[:19] | replace('T',' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Aucune lecture pour l'instant — cliquez "Générer lecture" dans la sidebar.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const logs    = {{ logs | tojson }};
+const sensors = ['temperature', 'turbidity', 'ph'];
+const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+
+// Filtrer par capteur si sélectionné
+const filter  = "{{ sensor or '' }}";
+const active  = filter ? [filter] : sensors;
+
+const maxPts  = 50;
+const datasets = active.map(s => {
+  const pts = logs.filter(l => l.sensor === s).slice(0, maxPts).reverse();
+  return {
+    label: s,
+    data: pts.map(l => l.value),
+    borderColor: colors[s],
+    backgroundColor: colors[s] + '22',
+    tension: 0.3,
+    pointRadius: 3,
+    fill: true,
+  };
+});
+
+const labels = Array.from({ length: maxPts }, (_, i) => i + 1);
+
+new Chart(document.getElementById('chartLine'), {
+  type: 'line',
+  data: { labels, datasets },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { position: 'bottom' } },
+    scales: { y: { beginAtZero: false } }
+  }
+});
+</script>
+{% endblock %}
