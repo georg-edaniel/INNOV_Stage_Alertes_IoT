@@ -4,8 +4,9 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<h1 class="page-title">
-  <span class="live-dot"></span>Dashboard — Monitoring IoT
+<h1 class="page-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <span><span class="live-dot"></span>Dashboard — Monitoring IoT</span>
+  <span id="live-status" style="font-size:.8rem;font-weight:400;color:#27ae60;">⬤ Connexion en cours...</span>
 </h1>
 
 <!-- KPIs -->
@@ -119,7 +120,7 @@ async function loadBarChart() {
     borderWidth: 1,
   }));
 
-  new Chart(document.getElementById('chartBar'), {
+  barChartInstance = new Chart(document.getElementById('chartBar'), {
     type: 'bar',
     data: { labels: Array.from({length: 10}, (_, i) => `T-${9-i}`), datasets },
     options: {
@@ -142,7 +143,85 @@ async function resolveAlert(id, btn) {
   setTimeout(() => location.reload(), 600);
 }
 
-// Auto-refresh toutes les 30s
-setTimeout(() => location.reload(), 30000);
+// ── SSE — mise à jour temps réel ───────────────────────────────
+const es = new EventSource('/api/stream');
+
+es.onopen = () => {
+  document.getElementById('live-status').textContent = '⬤ Connecté — temps réel actif';
+};
+
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.type === 'connected') {
+    document.getElementById('live-status').textContent = '⬤ Flux actif';
+    return;
+  }
+  if (data.type !== 'tick') return;
+
+  // Mettre à jour les KPIs
+  const s = data.stats;
+  document.querySelectorAll('.kpi-value')[0].textContent = s.critical;
+  document.querySelectorAll('.kpi-value')[1].textContent = s.warning;
+  document.querySelectorAll('.kpi-value')[2].textContent = s.resolved;
+  document.querySelectorAll('.kpi-value')[3].textContent = s.acknowledged;
+  document.querySelectorAll('.kpi-sub')[0].textContent   = `${s.critical - s.resolved} ouvertes`;
+  document.querySelectorAll('.kpi-sub')[1].textContent   = `${s.warning  - s.resolved} ouvertes`;
+  document.querySelectorAll('.kpi-sub')[2].textContent   = `sur ${s.total} au total`;
+
+  // Flash d'alerte si nouvelle alerte créée
+  if (data.alerts && data.alerts.length > 0) {
+    const lvl = data.alerts[0].level;
+    const color = lvl === 'CRITICAL' ? '#e74c3c' : '#f39c12';
+    document.body.style.boxShadow = `inset 0 0 0 3px ${color}`;
+    setTimeout(() => document.body.style.boxShadow = '', 1200);
+
+    // Ajouter la ligne dans le tableau
+    addAlertRow(data.alerts[0]);
+  }
+
+  // Mettre à jour le graphique barres
+  updateBarChart(data.readings);
+};
+
+es.onerror = () => {
+  // Reconnexion automatique gérée par le navigateur
+};
+
+// Ajouter une ligne d'alerte dans le tableau
+function addAlertRow(a) {
+  const tbody = document.querySelector('tbody');
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${a.id}</td>
+    <td><b>${a.sensor}</b></td>
+    <td>${a.value} ${a.unit}</td>
+    <td><span class="badge badge-${a.level.toLowerCase()}">${a.level}</span></td>
+    <td>${a.method}</td>
+    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.reason}">${a.reason}</td>
+    <td style="white-space:nowrap;font-size:.78rem;color:#999">${a.created_at.slice(0,19).replace('T',' ')}</td>
+    <td><button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button></td>
+  `;
+  tbody.prepend(tr);
+}
+
+// Mise à jour incrémentale du graphique barres
+let barChartInstance = null;
+const sensorBuffers = { temperature: [], turbidity: [], ph: [] };
+
+function updateBarChart(readings) {
+  if (!barChartInstance) return;
+  readings.forEach(r => {
+    const buf = sensorBuffers[r.sensor];
+    if (buf) {
+      buf.push(r.value);
+      if (buf.length > 10) buf.shift();
+    }
+  });
+  barChartInstance.data.datasets.forEach(ds => {
+    ds.data = [...(sensorBuffers[ds.label] || [])];
+  });
+  barChartInstance.update('none'); // mise à jour sans animation
+}
 </script>
 {% endblock %}

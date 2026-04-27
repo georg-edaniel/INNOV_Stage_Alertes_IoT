@@ -5,27 +5,49 @@ Point d'entrée FastAPI.
 Lance le simulateur IoT en arrière-plan et expose les endpoints d'alertes.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from ..alerts.database import init_db
+from ..simulator.scheduler import SimulatorScheduler
 from .routers import alerts_router, logs_router, simulator_router
 from .dashboard import dashboard_router
+from .stream import stream_router, push_tick
 
-STATIC_DIR    = Path(__file__).parent.parent / "dashboard" / "static"
-TEMPLATES_DIR = Path(__file__).parent.parent / "dashboard" / "templates"
+logger = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent.parent / "dashboard" / "static"
+
+# Scheduler global (démarré dans le lifespan)
+_scheduler: SimulatorScheduler | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Démarrage : créer les tables
+    global _scheduler
+
+    # 1. Créer les tables DB
     init_db()
+
+    # 2. Démarrer le simulateur IoT en arrière-plan (toutes les 5 secondes)
+    _scheduler = SimulatorScheduler(
+        interval_seconds=5,
+        callback=lambda readings: push_tick(),   # push_tick gère sa propre session DB
+        anomaly_probability=0.20,
+    )
+    _scheduler.start()
+    logger.info("Simulateur IoT démarré (intervalle : 5s)")
+
     yield
-    # Arrêt : rien de spécial
+
+    # 3. Arrêt propre du scheduler
+    if _scheduler:
+        _scheduler.stop()
+        logger.info("Simulateur IoT arrêté.")
 
 
 app = FastAPI(
@@ -45,16 +67,15 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(dashboard_router,                          tags=["Dashboard"])
+app.include_router(stream_router,    prefix="/api",           tags=["Temps réel"])
 app.include_router(alerts_router,    prefix="/api/alerts",    tags=["Alertes"])
 app.include_router(logs_router,      prefix="/api/logs",      tags=["Historique"])
 app.include_router(simulator_router, prefix="/api/simulator", tags=["Simulateur"])
 
 
-@app.get("/", tags=["Health"])
-def root():
-    return {"status": "ok", "service": "IoT Alert System", "version": "1.0.0"}
-
-
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "ok"}
+    return {
+        "status":            "ok",
+        "simulator_running": _scheduler.is_running if _scheduler else False,
+    }
