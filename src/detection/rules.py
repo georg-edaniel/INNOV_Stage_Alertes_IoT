@@ -10,21 +10,21 @@ Logique :
   - Valeur hors plage warning     → CRITICAL
 """
 
-from ..simulator.config import SENSOR_CONFIG
+from ..alerts.threshold_config import get_sensor
 from ..simulator.generator import SensorReading
 from .levels import AlertLevel, DetectionResult
 
 
 class RuleBasedDetector:
     """
-    Détecteur basé sur des seuils fixes définis dans SENSOR_CONFIG.
+    Détecteur basé sur des seuils définis dynamiquement (configurables via l'API).
 
     C'est la première ligne de défense : rapide, déterministe,
     facile à expliquer aux opérateurs.
     """
 
     def analyze(self, reading: SensorReading) -> DetectionResult:
-        cfg   = SENSOR_CONFIG[reading.sensor]
+        cfg   = get_sensor(reading.sensor)
         value = reading.value
 
         normal_min  = cfg["normal"]["min"]

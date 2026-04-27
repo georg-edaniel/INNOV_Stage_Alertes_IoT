@@ -35,6 +35,11 @@ _simulator = IoTSimulator(anomaly_probability=0.20)
 _engine    = AnomalyDetectionEngine(window_size=30)
 
 
+def set_simulator_probability(prob: float) -> None:
+    """Modifie la probabilité d'anomalie du simulateur SSE."""
+    _simulator.anomaly_probability = prob
+
+
 def push_tick():
     """
     Appelé par le scheduler à chaque cycle.
@@ -48,13 +53,15 @@ def push_tick():
         svc      = AlertService(db)
         alerts   = svc.process_batch(results, readings)
         stats    = svc.get_stats()
+        health   = svc.get_sensor_health()
 
         event = {
-            "type":     "tick",
-            "readings": [r.to_dict() for r in readings],
-            "results":  [r.to_dict() for r in results],
-            "alerts":   [a.to_dict() for a in alerts],
-            "stats":    stats,
+            "type":          "tick",
+            "readings":      [r.to_dict() for r in readings],
+            "results":       [r.to_dict() for r in results],
+            "alerts":        [a.to_dict() for a in alerts],
+            "stats":         stats,
+            "sensor_health": health,
         }
         # Non-bloquant : si la file est pleine on abandonne silencieusement
         try:

@@ -15,17 +15,17 @@
   {% endfor %}
 </div>
 
-<!-- Graphique temps réel -->
+<!-- Graphique temps réel avec horodatages -->
 <div class="chart-card" style="margin-bottom:1.5rem;">
-  <div class="chart-title">Évolution des valeurs — 200 dernières lectures</div>
-  <div style="position:relative;height:260px;"><canvas id="chartLine"></canvas></div>
+  <div class="chart-title">Évolution des valeurs — horodatages réels</div>
+  <div style="position:relative;height:280px;"><canvas id="chartLine"></canvas></div>
 </div>
 
 <!-- Tableau -->
 <div class="card">
   <div class="card-header">
     <h3>{{ logs | length }} lecture(s)</h3>
-    <span style="font-size:.8rem;color:#999;">Affichage : 200 plus récentes</span>
+    <span style="font-size:.8rem;color:#999;">200 plus récentes · <a href="/api/logs?limit=200{% if sensor %}&sensor={{ sensor }}{% endif %}" target="_blank">JSON ↗</a></span>
   </div>
   <div class="card-body">
     {% if logs %}
@@ -55,21 +55,21 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
 const logs    = {{ logs | tojson }};
 const sensors = ['temperature', 'turbidity', 'ph'];
 const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
 
-// Filtrer par capteur si sélectionné
-const filter  = "{{ sensor or '' }}";
+const filter = "{{ sensor or '' }}";
 const active  = filter ? [filter] : sensors;
 
-const maxPts  = 50;
+// Préparer les datasets avec vrais horodatages
 const datasets = active.map(s => {
-  const pts = logs.filter(l => l.sensor === s).slice(0, maxPts).reverse();
+  const pts = logs.filter(l => l.sensor === s).slice(0, 60).reverse();
   return {
     label: s,
-    data: pts.map(l => l.value),
+    data: pts.map(l => ({ x: new Date(l.created_at), y: l.value })),
     borderColor: colors[s],
     backgroundColor: colors[s] + '22',
     tension: 0.3,
@@ -78,16 +78,22 @@ const datasets = active.map(s => {
   };
 });
 
-const labels = Array.from({ length: maxPts }, (_, i) => i + 1);
-
 new Chart(document.getElementById('chartLine'), {
   type: 'line',
-  data: { labels, datasets },
+  data: { datasets },
   options: {
-    responsive: true, maintainAspectRatio: false,
+    responsive: true,
+    maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     plugins: { legend: { position: 'bottom' } },
-    scales: { y: { beginAtZero: false } }
+    scales: {
+      x: {
+        type: 'time',
+        time: { unit: 'minute', displayFormats: { minute: 'HH:mm' } },
+        title: { display: true, text: 'Heure' },
+      },
+      y: { beginAtZero: false, title: { display: true, text: 'Valeur' } }
+    }
   }
 });
 </script>

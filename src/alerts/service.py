@@ -201,6 +201,91 @@ class AlertService:
         self.db.add(log)
         self.db.commit()
 
+    def get_mttr(self) -> dict:
+        """Mean Time To Resolve par capteur (en secondes). None si aucune alerte résolue."""
+        result = {}
+        for sensor in ["temperature", "turbidity", "ph"]:
+            resolved = self.db.query(Alert).filter(
+                Alert.sensor == sensor,
+                Alert.resolved == True,       # noqa
+                Alert.resolved_at != None,    # noqa
+            ).all()
+            if not resolved:
+                result[sensor] = None
+            else:
+                durations = [
+                    (a.resolved_at - a.created_at).total_seconds()
+                    for a in resolved
+                    if a.resolved_at and a.created_at
+                ]
+                result[sensor] = round(sum(durations) / len(durations), 1) if durations else None
+        return result
+
+    def get_sensor_health(self) -> dict:
+        """Dernier état connu pour chaque capteur (niveau + valeur + horodatage)."""
+        health = {}
+        for sensor in ["temperature", "turbidity", "ph"]:
+            log = self.db.query(SensorLog).filter(
+                SensorLog.sensor == sensor
+            ).order_by(desc(SensorLog.created_at)).first()
+            if log:
+                health[sensor] = {
+                    "level":     log.level,
+                    "value":     round(log.value, 2),
+                    "unit":      log.unit,
+                    "last_seen": log.created_at.isoformat(),
+                }
+            else:
+                health[sensor] = {"level": "UNKNOWN", "value": None, "unit": "", "last_seen": None}
+        return health
+
+    def get_last_alert_time(self) -> str | None:
+        """ISO timestamp de la dernière alerte créée."""
+        alert = self.db.query(Alert).order_by(desc(Alert.created_at)).first()
+        return alert.created_at.isoformat() if alert else None
+
+    def get_report_data(self, days: int = 1) -> dict:
+        """Données de rapport agrégées sur les N derniers jours."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        all_alerts = self.db.query(Alert).filter(Alert.created_at >= cutoff).all()
+        all_logs   = self.db.query(SensorLog).filter(SensorLog.created_at >= cutoff).all()
+
+        by_sensor = {}
+        for sensor in ["temperature", "turbidity", "ph"]:
+            s_alerts = [a for a in all_alerts if a.sensor == sensor]
+            s_logs   = [l for l in all_logs   if l.sensor == sensor]
+            resolved = [a for a in s_alerts if a.resolved and a.resolved_at]
+
+            if resolved:
+                durations = [(a.resolved_at - a.created_at).total_seconds() for a in resolved]
+                mttr = round(sum(durations) / len(durations), 1)
+            else:
+                mttr = None
+
+            values = [l.value for l in s_logs]
+            by_sensor[sensor] = {
+                "total_alerts":    len(s_alerts),
+                "critical_alerts": sum(1 for a in s_alerts if a.level == "CRITICAL"),
+                "warning_alerts":  sum(1 for a in s_alerts if a.level == "WARNING"),
+                "resolved_alerts": len(resolved),
+                "readings_count":  len(s_logs),
+                "avg_value":       round(sum(values) / len(values), 2) if values else None,
+                "min_value":       round(min(values), 2) if values else None,
+                "max_value":       round(max(values), 2) if values else None,
+                "mttr_seconds":    mttr,
+            }
+
+        return {
+            "period_days":    days,
+            "generated_at":   datetime.now(timezone.utc).isoformat(),
+            "total_alerts":   len(all_alerts),
+            "total_readings": len(all_logs),
+            "by_sensor":      by_sensor,
+            "stats":          self.get_stats(),
+        }
+
     def _auto_resolve(self, sensor: str):
         """Résout automatiquement les alertes ouvertes quand le capteur revient à la normale."""
         now = datetime.now(timezone.utc)

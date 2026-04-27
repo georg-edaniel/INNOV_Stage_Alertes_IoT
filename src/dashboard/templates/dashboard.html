@@ -9,7 +9,7 @@
   <span id="live-status" style="font-size:.8rem;font-weight:400;color:#27ae60;">⬤ Connexion en cours...</span>
 </h1>
 
-<!-- KPIs -->
+<!-- KPIs alertes -->
 <div class="kpi-grid">
   <div class="kpi-card critical">
     <div class="kpi-label">Alertes critiques</div>
@@ -33,6 +33,24 @@
   </div>
 </div>
 
+<!-- KPIs MTTR -->
+<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
+  {% for sensor, label, icon in [('temperature','Température','🌡'),('turbidity','Turbidité','💧'),('ph','pH','⚗')] %}
+  <div class="kpi-card">
+    <div class="kpi-label">{{ icon }} MTTR — {{ label }}</div>
+    <div class="kpi-value" style="font-size:1.4rem;">
+      {% if mttr[sensor] %}
+        {% set s = mttr[sensor] | int %}
+        {% if s < 60 %}{{ s }}s
+        {% elif s < 3600 %}{{ (s // 60) }}m {{ (s % 60) }}s
+        {% else %}{{ (s // 3600) }}h {{ ((s % 3600) // 60) }}m{% endif %}
+      {% else %}—{% endif %}
+    </div>
+    <div class="kpi-sub">temps moyen de résolution</div>
+  </div>
+  {% endfor %}
+</div>
+
 <!-- Graphiques -->
 <div class="chart-grid">
   <div class="chart-card">
@@ -45,6 +63,26 @@
   </div>
 </div>
 
+<!-- Contrôles simulateur -->
+<div class="sim-controls">
+  <h3>🎛 Contrôle du simulateur</h3>
+  <div class="range-row">
+    <label>Probabilité d'anomalie</label>
+    <input type="range" id="prob-slider" class="range-input" min="0" max="1" step="0.05" value="0.20" oninput="updateProb(this.value)">
+    <span class="range-value" id="prob-val">20 %</span>
+    <button class="btn btn-primary btn-sm" onclick="applyProb()">Appliquer</button>
+  </div>
+  <div class="range-row" style="margin-bottom:0;">
+    <label>Injecter une anomalie</label>
+    <div class="btn-group">
+      <button class="btn btn-warning btn-sm" onclick="injectTick('temperature')">🌡 Température</button>
+      <button class="btn btn-warning btn-sm" onclick="injectTick('turbidity')">💧 Turbidité</button>
+      <button class="btn btn-warning btn-sm" onclick="injectTick('ph')">⚗ pH</button>
+    </div>
+  </div>
+  <div id="sim-msg" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;min-height:1rem;"></div>
+</div>
+
 <!-- Alertes ouvertes récentes -->
 <div class="card">
   <div class="card-header">
@@ -55,14 +93,12 @@
     {% if recent_alerts %}
     <table>
       <thead>
-        <tr>
-          <th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau</th><th>Méthode</th><th>Raison</th><th>Date</th><th>Actions</th>
-        </tr>
+        <tr><th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau</th><th>Méthode</th><th>Raison</th><th>Date</th><th>Actions</th></tr>
       </thead>
-      <tbody>
+      <tbody id="alerts-tbody">
         {% for a in recent_alerts %}
         <tr>
-          <td>{{ a.id }}</td>
+          <td><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
           <td><b>{{ a.sensor }}</b></td>
           <td>{{ a.value }} {{ a.unit }}</td>
           <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
@@ -89,11 +125,11 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-// Graphique Donut — répartition
+// ── Graphique Donut ────────────────────────────────────────────
 new Chart(document.getElementById('chartPie'), {
   type: 'doughnut',
   data: {
-    labels: ['Normal (résolus)', 'Warning', 'Critical'],
+    labels: ['Résolues', 'Warning', 'Critical'],
     datasets: [{
       data: [{{ stats.resolved }}, {{ stats.warning }}, {{ stats.critical }}],
       backgroundColor: ['#27ae60', '#f39c12', '#e74c3c'],
@@ -103,15 +139,16 @@ new Chart(document.getElementById('chartPie'), {
   options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
 });
 
-// Graphique Barres — lectures récentes par capteur (depuis l'API)
+// ── Graphique Barres ───────────────────────────────────────────
+let barChartInstance = null;
+const sensorBuffers = { temperature: [], turbidity: [], ph: [] };
+
 async function loadBarChart() {
   const r    = await fetch('/api/logs?limit=30');
   const data = await r.json();
   const logs = data.logs;
-
   const sensors = ['temperature', 'turbidity', 'ph'];
   const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
-
   const datasets = sensors.map(s => ({
     label: s,
     data: logs.filter(l => l.sensor === s).slice(0, 10).map(l => l.value),
@@ -119,7 +156,6 @@ async function loadBarChart() {
     borderColor: colors[s],
     borderWidth: 1,
   }));
-
   barChartInstance = new Chart(document.getElementById('chartBar'), {
     type: 'bar',
     data: { labels: Array.from({length: 10}, (_, i) => `T-${9-i}`), datasets },
@@ -132,7 +168,19 @@ async function loadBarChart() {
 }
 loadBarChart();
 
-// Actions alertes
+function updateBarChart(readings) {
+  if (!barChartInstance) return;
+  readings.forEach(r => {
+    const buf = sensorBuffers[r.sensor];
+    if (buf) { buf.push(r.value); if (buf.length > 10) buf.shift(); }
+  });
+  barChartInstance.data.datasets.forEach(ds => {
+    ds.data = [...(sensorBuffers[ds.label] || [])];
+  });
+  barChartInstance.update('none');
+}
+
+// ── Actions alertes ────────────────────────────────────────────
 async function ackAlert(id, btn) {
   await fetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' });
   btn.disabled = true; btn.textContent = 'Acquitté';
@@ -143,7 +191,26 @@ async function resolveAlert(id, btn) {
   setTimeout(() => location.reload(), 600);
 }
 
-// ── SSE — mise à jour temps réel ───────────────────────────────
+// ── Contrôles simulateur ───────────────────────────────────────
+function updateProb(v) {
+  document.getElementById('prob-val').textContent = Math.round(v * 100) + ' %';
+}
+async function applyProb() {
+  const v   = document.getElementById('prob-slider').value;
+  const msg = document.getElementById('sim-msg');
+  await fetch(`/api/simulator/config?probability=${v}`, { method: 'POST' });
+  msg.textContent = `✓ Probabilité réglée à ${Math.round(v * 100)} %`;
+  setTimeout(() => msg.textContent = '', 3000);
+}
+async function injectTick(sensor) {
+  const msg = document.getElementById('sim-msg');
+  const r   = await fetch(`/api/simulator/tick/${sensor}`, { method: 'POST' });
+  const d   = await r.json();
+  msg.textContent = d.alert ? `⚠ Alerte ${d.alert.level} créée sur ${sensor}` : `✓ ${sensor} : aucune anomalie`;
+  setTimeout(() => location.reload(), 800);
+}
+
+// ── SSE temps réel ─────────────────────────────────────────────
 const es = new EventSource('/api/stream');
 
 es.onopen = () => {
@@ -158,42 +225,45 @@ es.onmessage = (e) => {
   }
   if (data.type !== 'tick') return;
 
-  // Mettre à jour les KPIs
+  // KPIs alertes
   const s = data.stats;
   document.querySelectorAll('.kpi-value')[0].textContent = s.critical;
   document.querySelectorAll('.kpi-value')[1].textContent = s.warning;
   document.querySelectorAll('.kpi-value')[2].textContent = s.resolved;
   document.querySelectorAll('.kpi-value')[3].textContent = s.acknowledged;
-  document.querySelectorAll('.kpi-sub')[0].textContent   = `${s.critical - s.resolved} ouvertes`;
-  document.querySelectorAll('.kpi-sub')[1].textContent   = `${s.warning  - s.resolved} ouvertes`;
+  document.querySelectorAll('.kpi-sub')[0].textContent   = `${s.critical} ouvertes`;
+  document.querySelectorAll('.kpi-sub')[1].textContent   = `${s.warning} ouvertes`;
   document.querySelectorAll('.kpi-sub')[2].textContent   = `sur ${s.total} au total`;
 
-  // Flash d'alerte si nouvelle alerte créée
+  // Santé capteurs dans sidebar
+  if (data.sensor_health) updateHealthUI(data.sensor_health);
+
+  // Notification + flash si nouvelle alerte
   if (data.alerts && data.alerts.length > 0) {
-    const lvl = data.alerts[0].level;
-    const color = lvl === 'CRITICAL' ? '#e74c3c' : '#f39c12';
+    const a     = data.alerts[0];
+    const color = a.level === 'CRITICAL' ? '#e74c3c' : '#f39c12';
     document.body.style.boxShadow = `inset 0 0 0 3px ${color}`;
     setTimeout(() => document.body.style.boxShadow = '', 1200);
-
-    // Ajouter la ligne dans le tableau
-    addAlertRow(data.alerts[0]);
+    addAlertRow(a);
+    sendNotification(`Alerte ${a.level} — ${a.sensor}`, a.reason, a.level);
+    // Mettre à jour le timer
+    _lastAlertTs = new Date(a.created_at);
+    updateTimerDisplay();
   }
 
-  // Mettre à jour le graphique barres
   updateBarChart(data.readings);
 };
 
 es.onerror = () => {
-  // Reconnexion automatique gérée par le navigateur
+  document.getElementById('live-status').textContent = '⬤ Reconnexion...';
 };
 
-// Ajouter une ligne d'alerte dans le tableau
 function addAlertRow(a) {
-  const tbody = document.querySelector('tbody');
+  const tbody = document.getElementById('alerts-tbody');
   if (!tbody) return;
   const tr = document.createElement('tr');
   tr.innerHTML = `
-    <td>${a.id}</td>
+    <td><a href="/alerts/${a.id}">${a.id}</a></td>
     <td><b>${a.sensor}</b></td>
     <td>${a.value} ${a.unit}</td>
     <td><span class="badge badge-${a.level.toLowerCase()}">${a.level}</span></td>
@@ -203,25 +273,6 @@ function addAlertRow(a) {
     <td><button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button></td>
   `;
   tbody.prepend(tr);
-}
-
-// Mise à jour incrémentale du graphique barres
-let barChartInstance = null;
-const sensorBuffers = { temperature: [], turbidity: [], ph: [] };
-
-function updateBarChart(readings) {
-  if (!barChartInstance) return;
-  readings.forEach(r => {
-    const buf = sensorBuffers[r.sensor];
-    if (buf) {
-      buf.push(r.value);
-      if (buf.length > 10) buf.shift();
-    }
-  });
-  barChartInstance.data.datasets.forEach(ds => {
-    ds.data = [...(sensorBuffers[ds.label] || [])];
-  });
-  barChartInstance.update('none'); // mise à jour sans animation
 }
 </script>
 {% endblock %}

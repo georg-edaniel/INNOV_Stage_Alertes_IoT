@@ -18,6 +18,8 @@ templates     = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 dashboard_router = APIRouter()
 
+PER_PAGE = 20
+
 
 @dashboard_router.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(get_db)):
@@ -26,10 +28,16 @@ def index(request: Request, db: Session = Depends(get_db)):
     stats  = svc.get_stats()
     open_c = svc.get_open_count()
     recent = svc.get_all(resolved=False, limit=10)
+    mttr   = svc.get_mttr()
+    health = svc.get_sensor_health()
+    last_t = svc.get_last_alert_time()
     return templates.TemplateResponse(request, "dashboard.html", {
         "stats":         stats,
         "open":          open_c,
         "recent_alerts": [a.to_dict() for a in recent],
+        "mttr":          mttr,
+        "health":        health,
+        "last_alert_at": last_t,
     })
 
 
@@ -38,26 +46,54 @@ def alerts_page(
     request:  Request,
     sensor:   str | None = None,
     level:    str | None = None,
-    resolved: str | None = None,   # reçu comme string depuis le formulaire HTML
+    resolved: str | None = None,
+    page:     int = 1,
     db: Session = Depends(get_db),
 ):
-    """Page historique des alertes avec filtres."""
-    # Convertir les chaînes vides en None, "true"/"false" en bool
-    sensor_f   = sensor   or None
-    level_f    = level    or None
+    """Page historique des alertes avec filtres et pagination."""
+    sensor_f   = sensor or None
+    level_f    = level  or None
     resolved_f: bool | None = None
     if resolved == "true":
         resolved_f = True
     elif resolved == "false":
         resolved_f = False
 
+    page   = max(1, page)
+    offset = (page - 1) * PER_PAGE
+
     svc    = AlertService(db)
-    alerts = svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f, limit=100)
+    alerts = svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f,
+                         limit=PER_PAGE, offset=offset)
+    # Compte total pour la pagination
+    total  = len(svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f, limit=5000))
     stats  = svc.get_stats()
+    total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+
     return templates.TemplateResponse(request, "alerts.html", {
-        "alerts":  [a.to_dict() for a in alerts],
-        "stats":   stats,
-        "filters": {"sensor": sensor_f, "level": level_f, "resolved": resolved_f},
+        "alerts":       [a.to_dict() for a in alerts],
+        "stats":        stats,
+        "filters":      {"sensor": sensor_f, "level": level_f, "resolved": resolved_f},
+        "page":         page,
+        "total_pages":  total_pages,
+        "total":        total,
+        "per_page":     PER_PAGE,
+        "has_prev":     page > 1,
+        "has_next":     page < total_pages,
+    })
+
+
+@dashboard_router.get("/alerts/{alert_id}", response_class=HTMLResponse)
+def alert_detail(alert_id: int, request: Request, db: Session = Depends(get_db)):
+    """Page de détail d'une alerte."""
+    svc   = AlertService(db)
+    alert = svc.get_by_id(alert_id)
+    if not alert:
+        return templates.TemplateResponse(request, "404.html", {}, status_code=404)
+    logs = svc.get_logs(sensor=alert.sensor, limit=50)
+    return templates.TemplateResponse(request, "alert_detail.html", {
+        "alert": alert.to_dict(),
+        "logs":  [l.to_dict() for l in logs],
     })
 
 
@@ -73,4 +109,28 @@ def logs_page(
     return templates.TemplateResponse(request, "logs.html", {
         "logs":   [l.to_dict() for l in logs],
         "sensor": sensor,
+    })
+
+
+@dashboard_router.get("/report", response_class=HTMLResponse)
+def report_page(
+    request: Request,
+    days: int = 1,
+    db: Session = Depends(get_db),
+):
+    """Page de rapport agrégé (dernières N journées)."""
+    svc    = AlertService(db)
+    report = svc.get_report_data(days=max(1, min(days, 30)))
+    return templates.TemplateResponse(request, "report.html", {
+        "report": report,
+        "days":   days,
+    })
+
+
+@dashboard_router.get("/config", response_class=HTMLResponse)
+def config_page(request: Request):
+    """Page de configuration des seuils."""
+    from ..alerts.threshold_config import get_all
+    return templates.TemplateResponse(request, "thresholds.html", {
+        "thresholds": get_all(),
     })

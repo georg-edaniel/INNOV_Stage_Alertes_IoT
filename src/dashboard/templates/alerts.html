@@ -51,8 +51,12 @@
 <!-- Tableau -->
 <div class="card">
   <div class="card-header">
-    <h3>{{ alerts | length }} alerte(s)</h3>
-    <button class="btn btn-warning btn-sm" onclick="ackAll()">Tout acquitter</button>
+    <h3>{{ total }} alerte(s) — page {{ page }}/{{ total_pages }}</h3>
+    <div class="btn-group">
+      <button class="btn btn-warning btn-sm" onclick="ackAll()">Tout acquitter</button>
+      <a href="/api/alerts/export{% if filters.sensor or filters.level or filters.resolved is not none %}?{% if filters.sensor %}sensor={{ filters.sensor }}&{% endif %}{% if filters.level %}level={{ filters.level }}&{% endif %}{% if filters.resolved is not none %}resolved={{ filters.resolved | lower }}{% endif %}{% endif %}"
+         class="btn btn-outline btn-sm" download>⬇ Export CSV</a>
+    </div>
   </div>
   <div class="card-body">
     {% if alerts %}
@@ -63,7 +67,7 @@
       <tbody>
         {% for a in alerts %}
         <tr id="row-{{ a.id }}" {% if a.resolved %}style="opacity:.5"{% endif %}>
-          <td>{{ a.id }}</td>
+          <td><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
           <td><b>{{ a.sensor }}</b></td>
           <td>{{ a.value }} {{ a.unit }}</td>
           <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
@@ -92,6 +96,21 @@
     {% endif %}
   </div>
 </div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if has_prev %}
+  <a href="/alerts?page={{ page - 1 }}{% if filters.sensor %}&sensor={{ filters.sensor }}{% endif %}{% if filters.level %}&level={{ filters.level }}{% endif %}{% if filters.resolved is not none %}&resolved={{ filters.resolved | lower }}{% endif %}"
+     class="btn btn-outline btn-sm">← Précédent</a>
+  {% endif %}
+  <span class="page-info">Page {{ page }} sur {{ total_pages }} ({{ total }} alertes)</span>
+  {% if has_next %}
+  <a href="/alerts?page={{ page + 1 }}{% if filters.sensor %}&sensor={{ filters.sensor }}{% endif %}{% if filters.level %}&level={{ filters.level }}{% endif %}{% if filters.resolved is not none %}&resolved={{ filters.resolved | lower }}{% endif %}"
+     class="btn btn-outline btn-sm">Suivant →</a>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

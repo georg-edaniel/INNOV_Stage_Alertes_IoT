@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% set active = "report" %}
+{% block title %}Rapport{% endblock %}
+
+{% block content %}
+<h1 class="page-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+  <span>📄 Rapport d'activité</span>
+  <div class="btn-group">
+    <a href="/report?days=1"  class="btn {% if days==1 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">24 h</a>
+    <a href="/report?days=7"  class="btn {% if days==7 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">7 j</a>
+    <a href="/report?days=30" class="btn {% if days==30 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">30 j</a>
+  </div>
+</h1>
+
+<div class="info-box">
+  Rapport généré le {{ report.generated_at[:19] | replace('T',' ') }} UTC · Période : dernières {{ days }} journée(s)
+</div>
+
+<!-- KPIs globaux -->
+<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
+  <div class="kpi-card critical">
+    <div class="kpi-label">Total alertes</div>
+    <div class="kpi-value">{{ report.total_alerts }}</div>
+    <div class="kpi-sub">sur la période</div>
+  </div>
+  <div class="kpi-card success">
+    <div class="kpi-label">Total lectures</div>
+    <div class="kpi-value">{{ report.total_readings }}</div>
+    <div class="kpi-sub">capteurs enregistrés</div>
+  </div>
+  <div class="kpi-card warning">
+    <div class="kpi-label">Taux d'anomalie</div>
+    <div class="kpi-value">
+      {% if report.total_readings > 0 %}
+        {{ "%.1f"|format(report.total_alerts / report.total_readings * 100) }} %
+      {% else %}—{% endif %}
+    </div>
+    <div class="kpi-sub">alertes / lectures</div>
+  </div>
+</div>
+
+<!-- Par capteur -->
+<div class="report-grid">
+  {% for sensor, label, icon, unit in [
+      ('temperature','Température','🌡','°C'),
+      ('turbidity','Turbidité','💧','NTU'),
+      ('ph','pH','⚗','pH')
+  ] %}
+  {% set d = report.by_sensor[sensor] %}
+  <div class="report-card">
+    <h4>{{ icon }} {{ label }}</h4>
+    <div class="report-stat">
+      <span>Alertes total</span>
+      <span class="rs-val">{{ d.total_alerts }}</span>
+    </div>
+    <div class="report-stat">
+      <span>Critiques</span>
+      <span class="rs-val" style="color:var(--critical);">{{ d.critical_alerts }}</span>
+    </div>
+    <div class="report-stat">
+      <span>Avertissements</span>
+      <span class="rs-val" style="color:var(--warning);">{{ d.warning_alerts }}</span>
+    </div>
+    <div class="report-stat">
+      <span>Résolues</span>
+      <span class="rs-val" style="color:var(--success);">{{ d.resolved_alerts }}</span>
+    </div>
+    <div class="report-stat">
+      <span>Lectures</span>
+      <span class="rs-val">{{ d.readings_count }}</span>
+    </div>
+    {% if d.avg_value is not none %}
+    <div class="report-stat">
+      <span>Valeur moy.</span>
+      <span class="rs-val">{{ d.avg_value }} {{ unit }}</span>
+    </div>
+    <div class="report-stat">
+      <span>Min / Max</span>
+      <span class="rs-val">{{ d.min_value }} / {{ d.max_value }} {{ unit }}</span>
+    </div>
+    {% endif %}
+    <div class="report-stat" style="border:none;padding-top:.6rem;">
+      <span>⏱ MTTR</span>
+      <span class="mttr-value">
+        {% if d.mttr_seconds %}
+          {% set s = d.mttr_seconds | int %}
+          {% if s < 60 %}{{ s }}s
+          {% elif s < 3600 %}{{ (s // 60) }}m {{ (s % 60) }}s
+          {% else %}{{ (s // 3600) }}h {{ ((s % 3600) // 60) }}m{% endif %}
+        {% else %}—{% endif %}
+      </span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Graphique de répartition par capteur -->
+<div class="chart-grid">
+  <div class="chart-card">
+    <div class="chart-title">Alertes par capteur</div>
+    <div class="chart-wrap"><canvas id="chartBySensor"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Taux de résolution</div>
+    <div class="chart-wrap"><canvas id="chartResolution"></canvas></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const sensors = ['temperature', 'turbidity', 'ph'];
+const colors  = ['#1a5c9c', '#8e44ad', '#16a085'];
+const data    = {{ report.by_sensor | tojson }};
+
+// Alertes par capteur (stacked bar)
+new Chart(document.getElementById('chartBySensor'), {
+  type: 'bar',
+  data: {
+    labels: sensors,
+    datasets: [
+      { label: 'Critical', data: sensors.map(s => data[s].critical_alerts), backgroundColor: '#e74c3c' },
+      { label: 'Warning',  data: sensors.map(s => data[s].warning_alerts),  backgroundColor: '#f39c12' },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { position: 'bottom' } },
+    scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+  }
+});
+
+// Taux de résolution (donut par capteur)
+new Chart(document.getElementById('chartResolution'), {
+  type: 'doughnut',
+  data: {
+    labels: sensors.map(s => s + ' (résolues)'),
+    datasets: [{
+      data: sensors.map(s => data[s].resolved_alerts),
+      backgroundColor: colors,
+      borderWidth: 2,
+    }]
+  },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+});
+</script>
+{% endblock %}

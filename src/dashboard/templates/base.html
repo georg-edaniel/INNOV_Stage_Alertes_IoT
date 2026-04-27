@@ -12,15 +12,34 @@
   <!-- Sidebar -->
   <nav class="sidebar">
     <div class="sidebar-logo"><span>🌊</span> IoT Alerts</div>
+
     <div class="nav-section">Navigation</div>
-    <a href="/"       class="nav-item {% if active=='dashboard' %}active{% endif %}">📊 Dashboard</a>
-    <a href="/alerts" class="nav-item {% if active=='alerts'    %}active{% endif %}">🔔 Alertes</a>
-    <a href="/logs"   class="nav-item {% if active=='logs'      %}active{% endif %}">📋 Historique</a>
+    <a href="/"         class="nav-item {% if active=='dashboard'   %}active{% endif %}">📊 Dashboard</a>
+    <a href="/alerts"   class="nav-item {% if active=='alerts'      %}active{% endif %}">🔔 Alertes</a>
+    <a href="/logs"     class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
+    <a href="/report"   class="nav-item {% if active=='report'      %}active{% endif %}">📄 Rapport</a>
+    <a href="/config"   class="nav-item {% if active=='config'      %}active{% endif %}">⚙️ Seuils</a>
+
     <div class="nav-section">API</div>
-    <a href="/docs"   class="nav-item" target="_blank">📄 Swagger UI</a>
+    <a href="/docs" class="nav-item" target="_blank">📖 Swagger UI</a>
+
+    <div class="nav-section">Capteurs</div>
+    <div class="sensor-health-list" id="sidebar-health">
+      <div class="sensor-health-item"><span class="sh-name">🌡 Temp.</span><span class="sh-dot unknown" id="sh-dot-temperature"></span><span class="sh-val" id="sh-val-temperature">—</span></div>
+      <div class="sensor-health-item"><span class="sh-name">💧 Turbidité</span><span class="sh-dot unknown" id="sh-dot-turbidity"></span><span class="sh-val" id="sh-val-turbidity">—</span></div>
+      <div class="sensor-health-item"><span class="sh-name">⚗ pH</span><span class="sh-dot unknown" id="sh-dot-ph"></span><span class="sh-val" id="sh-val-ph">—</span></div>
+    </div>
+    <div class="last-alert-timer" id="last-alert-display">Dernière alerte : —</div>
+
     <div class="nav-section">Simulateur</div>
     <button class="nav-item btn" style="width:100%;background:rgba(255,255,255,.1);color:#fff;border:none;cursor:pointer;" onclick="triggerTick()">▶ Générer lecture</button>
     <div id="tick-msg" style="font-size:.75rem;color:rgba(255,255,255,.7);margin:.4rem .8rem;min-height:1rem;"></div>
+
+    <!-- Footer sidebar -->
+    <div class="sidebar-footer">
+      <button class="dark-toggle" id="dark-toggle-btn" onclick="toggleDark()">🌙 Mode sombre</button>
+      <button class="notif-btn" id="notif-btn" onclick="requestNotifications()">🔔 Notifications</button>
+    </div>
   </nav>
 
   <!-- Main -->
@@ -31,6 +50,53 @@
 </div>
 
 <script>
+// ── Dark mode ──────────────────────────────────────────────────
+(function() {
+  if (localStorage.getItem('dark') === '1') {
+    document.body.classList.add('dark');
+  }
+})();
+
+function toggleDark() {
+  const on = document.body.classList.toggle('dark');
+  localStorage.setItem('dark', on ? '1' : '0');
+  document.getElementById('dark-toggle-btn').textContent = on ? '☀️ Mode clair' : '🌙 Mode sombre';
+}
+
+// Appliquer le label correct au chargement
+if (document.body.classList.contains('dark')) {
+  document.getElementById('dark-toggle-btn').textContent = '☀️ Mode clair';
+}
+
+// ── Notifications navigateur ───────────────────────────────────
+let _notifGranted = (Notification.permission === 'granted');
+
+function requestNotifications() {
+  if (!('Notification' in window)) {
+    alert('Les notifications ne sont pas supportées par ce navigateur.');
+    return;
+  }
+  Notification.requestPermission().then(p => {
+    _notifGranted = (p === 'granted');
+    const btn = document.getElementById('notif-btn');
+    btn.textContent = _notifGranted ? '🔔 Notifs actives' : '🔕 Notifs refusées';
+    if (_notifGranted) btn.style.color = '#27ae60';
+  });
+}
+
+function sendNotification(title, body, level) {
+  if (!_notifGranted) return;
+  const icon = level === 'CRITICAL' ? '🚨' : '⚠️';
+  new Notification(`${icon} ${title}`, { body, icon: '/static/favicon.ico' });
+}
+
+// Mettre à jour le bouton selon l'état actuel
+if (Notification.permission === 'granted') {
+  document.getElementById('notif-btn').textContent = '🔔 Notifs actives';
+  document.getElementById('notif-btn').style.color = '#27ae60';
+}
+
+// ── Générer une lecture ────────────────────────────────────────
 async function triggerTick() {
   const msg = document.getElementById('tick-msg');
   msg.textContent = 'Génération...';
@@ -44,6 +110,56 @@ async function triggerTick() {
     msg.textContent = '✗ Erreur : ' + e.message;
   }
 }
+
+// ── Santé capteurs (init depuis API) ──────────────────────────
+async function initSensorHealth() {
+  try {
+    const r = await fetch('/api/sensors/health');
+    const h = await r.json();
+    updateHealthUI(h);
+  } catch(_) {}
+}
+
+function updateHealthUI(health) {
+  for (const [sensor, info] of Object.entries(health)) {
+    const dot = document.getElementById('sh-dot-' + sensor);
+    const val = document.getElementById('sh-val-' + sensor);
+    if (!dot || !val) continue;
+    const lvl = (info.level || 'unknown').toLowerCase();
+    dot.className = 'sh-dot ' + lvl;
+    val.textContent = info.value !== null ? `${info.value} ${info.unit}` : '—';
+  }
+}
+
+initSensorHealth();
+
+// ── Timer "dernière alerte il y a X" ──────────────────────────
+let _lastAlertTs = null;
+
+async function initLastAlertTimer() {
+  try {
+    const r    = await fetch('/api/alerts?limit=1');
+    const data = await r.json();
+    if (data.alerts && data.alerts.length > 0) {
+      _lastAlertTs = new Date(data.alerts[0].created_at);
+      updateTimerDisplay();
+    }
+  } catch(_) {}
+}
+
+function updateTimerDisplay() {
+  if (!_lastAlertTs) return;
+  const el  = document.getElementById('last-alert-display');
+  const sec = Math.floor((Date.now() - _lastAlertTs.getTime()) / 1000);
+  let txt;
+  if (sec < 60)        txt = `${sec}s`;
+  else if (sec < 3600) txt = `${Math.floor(sec/60)}m ${sec%60}s`;
+  else                 txt = `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+  el.textContent = `Dernière alerte : il y a ${txt}`;
+}
+
+initLastAlertTimer();
+setInterval(updateTimerDisplay, 1000);
 </script>
 {% block scripts %}{% endblock %}
 </body>

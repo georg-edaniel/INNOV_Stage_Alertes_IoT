@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% set active = "alerts" %}
+{% block title %}Alerte #{{ alert.id }}{% endblock %}
+
+{% block content %}
+<h1 class="page-title">
+  🔔 Alerte <span style="color:var(--{% if alert.level=='CRITICAL' %}critical{% else %}warning{% endif %});">#{{ alert.id }}</span>
+  <a href="/alerts" class="btn btn-outline btn-sm" style="font-size:.85rem;font-weight:400;vertical-align:middle;margin-left:.8rem;">← Retour</a>
+</h1>
+
+<!-- Détails principaux -->
+<div class="detail-grid">
+  <div class="detail-item">
+    <div class="detail-label">Capteur</div>
+    <div class="detail-value">{{ alert.sensor }}</div>
+  </div>
+  <div class="detail-item">
+    <div class="detail-label">Valeur mesurée</div>
+    <div class="detail-value">{{ alert.value }} {{ alert.unit }}</div>
+  </div>
+  <div class="detail-item">
+    <div class="detail-label">Niveau</div>
+    <div class="detail-value"><span class="badge badge-{{ alert.level | lower }}">{{ alert.level }}</span></div>
+  </div>
+  <div class="detail-item">
+    <div class="detail-label">Méthode de détection</div>
+    <div class="detail-value">{{ alert.method }}</div>
+  </div>
+  <div class="detail-item">
+    <div class="detail-label">Z-score</div>
+    <div class="detail-value">{{ "%.3f"|format(alert.z_score) if alert.z_score else '—' }}</div>
+  </div>
+  <div class="detail-item">
+    <div class="detail-label">Statut</div>
+    <div class="detail-value">
+      {% if alert.resolved %}<span class="badge badge-normal">✅ Résolue</span>
+      {% elif alert.acknowledged %}<span class="badge badge-ack">👁 Acquittée</span>
+      {% else %}<span class="badge badge-warning">🔴 Ouverte</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Raison complète -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3>📝 Raison</h3></div>
+  <div class="card-body" style="padding:1rem 1.4rem;font-size:.95rem;">{{ alert.reason }}</div>
+</div>
+
+<!-- Timeline -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3>⏱ Timeline</h3></div>
+  <div class="card-body" style="padding:1rem 1.4rem;">
+    <ul class="timeline">
+      <li>
+        <span class="tl-icon">🚨</span>
+        <div>
+          <div class="tl-text">Alerte créée</div>
+          <div class="tl-time">{{ alert.created_at[:19] | replace('T',' ') }}</div>
+        </div>
+      </li>
+      {% if alert.acknowledged %}
+      <li>
+        <span class="tl-icon">👁</span>
+        <div>
+          <div class="tl-text">Acquittée par un opérateur</div>
+          <div class="tl-time">—</div>
+        </div>
+      </li>
+      {% endif %}
+      {% if alert.resolved %}
+      <li>
+        <span class="tl-icon">✅</span>
+        <div>
+          <div class="tl-text">Résolue (retour à la normale)</div>
+          <div class="tl-time">{{ alert.resolved_at[:19] | replace('T',' ') if alert.resolved_at else '—' }}</div>
+        </div>
+      </li>
+      {% if alert.resolved_at and alert.created_at %}
+      <li>
+        <span class="tl-icon">⏱</span>
+        <div>
+          <div class="tl-text">Durée de résolution</div>
+          <div class="tl-time" id="duration-display">Calcul en cours...</div>
+        </div>
+      </li>
+      {% endif %}
+      {% else %}
+      <li>
+        <span class="tl-icon">🔄</span>
+        <div>
+          <div class="tl-text">En cours — âge de l'alerte</div>
+          <div class="tl-time" id="age-display">—</div>
+        </div>
+      </li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+
+<!-- Graphique des lectures du capteur -->
+<div class="card">
+  <div class="card-header"><h3>📈 Lectures récentes — {{ alert.sensor }}</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div style="position:relative;height:240px;"><canvas id="chartSensor"></canvas></div>
+  </div>
+</div>
+
+<!-- Actions -->
+{% if not alert.resolved %}
+<div style="display:flex;gap:.8rem;margin-top:1.5rem;">
+  {% if not alert.acknowledged %}
+  <button class="btn btn-outline" onclick="ack()">👁 Acquitter</button>
+  {% endif %}
+  <button class="btn btn-success" onclick="resolve()">✅ Résoudre</button>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+const logs      = {{ logs | tojson }};
+const alertSensor = "{{ alert.sensor }}";
+const createdAt = new Date("{{ alert.created_at }}");
+{% if alert.resolved_at %}
+const resolvedAt = new Date("{{ alert.resolved_at }}");
+const durSec = Math.round((resolvedAt - createdAt) / 1000);
+const el = document.getElementById('duration-display');
+if (el) el.textContent = durSec < 60 ? `${durSec}s` : durSec < 3600 ? `${Math.floor(durSec/60)}m ${durSec%60}s` : `${Math.floor(durSec/3600)}h ${Math.floor((durSec%3600)/60)}m`;
+{% endif %}
+
+// Timer âge alerte si non résolue
+const ageEl = document.getElementById('age-display');
+if (ageEl) {
+  setInterval(() => {
+    const sec = Math.floor((Date.now() - createdAt) / 1000);
+    ageEl.textContent = sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec/60)}m ${sec%60}s` : `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+  }, 1000);
+}
+
+// Graphique des lectures
+const pts = logs.filter(l => l.sensor === alertSensor).slice(0, 50).reverse();
+new Chart(document.getElementById('chartSensor'), {
+  type: 'line',
+  data: {
+    datasets: [{
+      label: alertSensor,
+      data: pts.map(l => ({ x: new Date(l.created_at), y: l.value })),
+      borderColor: '#1a5c9c',
+      backgroundColor: '#1a5c9c22',
+      tension: 0.3,
+      pointRadius: 3,
+      fill: true,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+      annotation: {
+        annotations: {
+          alertLine: {
+            type: 'line', xMin: createdAt, xMax: createdAt,
+            borderColor: '#e74c3c', borderWidth: 2, borderDash: [5,5],
+            label: { content: 'Alerte', enabled: true }
+          }
+        }
+      }
+    },
+    scales: {
+      x: { type: 'time', time: { unit: 'minute', displayFormats: { minute: 'HH:mm' } } },
+      y: { beginAtZero: false }
+    }
+  }
+});
+
+async function ack() {
+  await fetch(`/api/alerts/{{ alert.id }}/acknowledge`, { method: 'PATCH' });
+  location.reload();
+}
+async function resolve() {
+  await fetch(`/api/alerts/{{ alert.id }}/resolve`, { method: 'PATCH' });
+  location.reload();
+}
+</script>
+{% endblock %}

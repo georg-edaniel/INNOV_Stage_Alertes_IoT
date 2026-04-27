@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% set active = "config" %}
+{% block title %}Configuration seuils{% endblock %}
+
+{% block content %}
+<h1 class="page-title">⚙️ Configuration des seuils</h1>
+
+<div class="info-box">
+  Les modifications sont appliquées immédiatement, sans redémarrage.
+  Les seuils sont persistés dans <code>thresholds_override.json</code>.
+</div>
+
+<div id="msg" style="min-height:1.5rem;font-size:.9rem;margin-bottom:1rem;"></div>
+
+<div class="threshold-grid">
+  {% for sensor, label, icon in [('temperature','Température','🌡'),('turbidity','Turbidité','💧'),('ph','pH','⚗')] %}
+  {% set cfg = thresholds[sensor] %}
+  <div class="threshold-card">
+    <h4>{{ icon }} {{ label }} ({{ cfg.unit }})</h4>
+
+    {% for zone, zlabel, color in [('normal','Normal','var(--success)'),('warning','Warning','var(--warning)'),('critical','Critical','var(--critical)')] %}
+    <div style="margin-bottom:.8rem;">
+      <div style="font-size:.8rem;font-weight:600;color:{{ color }};margin-bottom:.4rem;text-transform:uppercase;">{{ zlabel }}</div>
+      <div class="threshold-row">
+        <label>Min</label>
+        <input type="number" step="0.1"
+               id="{{ sensor }}-{{ zone }}-min"
+               value="{{ cfg[zone].min }}"
+               oninput="markDirty('{{ sensor }}')">
+        <label>Max</label>
+        <input type="number" step="0.1"
+               id="{{ sensor }}-{{ zone }}-max"
+               value="{{ cfg[zone].max }}"
+               oninput="markDirty('{{ sensor }}')">
+      </div>
+    </div>
+    {% endfor %}
+
+    <div style="display:flex;gap:.5rem;margin-top:.5rem;">
+      <button class="btn btn-primary btn-sm" onclick="saveThresholds('{{ sensor }}')">💾 Enregistrer</button>
+      <span id="status-{{ sensor }}" style="font-size:.78rem;color:var(--muted);align-self:center;"></span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div style="margin-top:1rem;">
+  <button class="btn btn-danger btn-sm" onclick="resetAll()">🔄 Réinitialiser tout aux valeurs par défaut</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const dirty = {};
+
+function markDirty(sensor) {
+  dirty[sensor] = true;
+  const s = document.getElementById('status-' + sensor);
+  s.textContent = '● Modifié';
+  s.style.color = 'var(--warning)';
+}
+
+async function saveThresholds(sensor) {
+  const zones = ['normal', 'warning', 'critical'];
+  const statusEl = document.getElementById('status-' + sensor);
+  statusEl.textContent = 'Sauvegarde...';
+
+  let ok = true;
+  for (const zone of zones) {
+    const minV = parseFloat(document.getElementById(`${sensor}-${zone}-min`).value);
+    const maxV = parseFloat(document.getElementById(`${sensor}-${zone}-max`).value);
+    if (minV >= maxV) {
+      statusEl.textContent = `Erreur : min >= max pour ${zone}`;
+      statusEl.style.color = 'var(--critical)';
+      ok = false; break;
+    }
+    const url = `/api/config/thresholds?sensor=${sensor}&zone=${zone}&min=${minV}&max=${maxV}`;
+    const r   = await fetch(url, { method: 'POST' });
+    if (!r.ok) { ok = false; break; }
+  }
+
+  if (ok) {
+    statusEl.textContent = '✓ Enregistré';
+    statusEl.style.color = 'var(--success)';
+    delete dirty[sensor];
+    setTimeout(() => statusEl.textContent = '', 3000);
+  } else {
+    statusEl.textContent = '✗ Erreur';
+    statusEl.style.color = 'var(--critical)';
+  }
+}
+
+async function resetAll() {
+  if (!confirm('Réinitialiser tous les seuils aux valeurs par défaut ?')) return;
+  await fetch('/api/config/thresholds/reset', { method: 'POST' });
+  location.reload();
+}
+
+// Avertir si on quitte avec des changements non sauvegardés
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(dirty).length > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+</script>
+{% endblock %}
