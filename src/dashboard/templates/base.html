@@ -41,10 +41,10 @@ async function triggerTick() {
     msg.textContent = n ? `⚠ ${n} alerte(s) créée(s)` : '✓ Aucune anomalie';
     setTimeout(() => location.reload(), 800);
   } catch (e) {
-    msg.textContent = '✗ Erreur';
+    msg.textContent = '✗ Erreur : ' + e.message;
   }
 }
-{% block scripts %}{% endblock %}
 </script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

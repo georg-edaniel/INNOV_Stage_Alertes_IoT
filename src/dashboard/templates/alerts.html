@@ -29,8 +29,8 @@
       <label>Statut</label>
       <select name="resolved">
         <option value="">Tous</option>
-        <option value="false" {% if filters.resolved==false %}selected{% endif %}>Ouvertes</option>
-        <option value="true"  {% if filters.resolved==true  %}selected{% endif %}>Résolues</option>
+        <option value="false" {% if filters.resolved == False %}selected{% endif %}>Ouvertes</option>
+        <option value="true"  {% if filters.resolved == True  %}selected{% endif %}>Résolues</option>
       </select>
     </div>
     <div class="filter-group" style="align-self:flex-end;">

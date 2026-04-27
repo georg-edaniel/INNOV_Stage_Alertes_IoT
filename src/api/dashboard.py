@@ -35,20 +35,29 @@ def index(request: Request, db: Session = Depends(get_db)):
 
 @dashboard_router.get("/alerts", response_class=HTMLResponse)
 def alerts_page(
-    request: Request,
+    request:  Request,
     sensor:   str | None = None,
     level:    str | None = None,
-    resolved: bool | None = None,
+    resolved: str | None = None,   # reçu comme string depuis le formulaire HTML
     db: Session = Depends(get_db),
 ):
     """Page historique des alertes avec filtres."""
+    # Convertir les chaînes vides en None, "true"/"false" en bool
+    sensor_f   = sensor   or None
+    level_f    = level    or None
+    resolved_f: bool | None = None
+    if resolved == "true":
+        resolved_f = True
+    elif resolved == "false":
+        resolved_f = False
+
     svc    = AlertService(db)
-    alerts = svc.get_all(sensor=sensor, level=level, resolved=resolved, limit=100)
+    alerts = svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f, limit=100)
     stats  = svc.get_stats()
     return templates.TemplateResponse(request, "alerts.html", {
         "alerts":  [a.to_dict() for a in alerts],
         "stats":   stats,
-        "filters": {"sensor": sensor, "level": level, "resolved": resolved},
+        "filters": {"sensor": sensor_f, "level": level_f, "resolved": resolved_f},
     })
 
 
@@ -60,7 +69,7 @@ def logs_page(
 ):
     """Page historique des lectures capteurs + graphiques."""
     svc  = AlertService(db)
-    logs = svc.get_logs(sensor=sensor, limit=200)
+    logs = svc.get_logs(sensor=sensor or None, limit=200)
     return templates.TemplateResponse(request, "logs.html", {
         "logs":   [l.to_dict() for l in logs],
         "sensor": sensor,
