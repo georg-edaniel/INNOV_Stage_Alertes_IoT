@@ -18,7 +18,8 @@ templates     = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 dashboard_router = APIRouter()
 
-PER_PAGE = 20
+PER_PAGE      = 20   # alertes par page
+LOGS_PER_PAGE = 15   # lectures par page
 
 
 @dashboard_router.get("/", response_class=HTMLResponse)
@@ -101,14 +102,31 @@ def alert_detail(alert_id: int, request: Request, db: Session = Depends(get_db))
 def logs_page(
     request: Request,
     sensor: str | None = None,
+    page:   int = 1,
     db: Session = Depends(get_db),
 ):
-    """Page historique des lectures capteurs + graphiques."""
-    svc  = AlertService(db)
-    logs = svc.get_logs(sensor=sensor or None, limit=200)
+    """Page historique des lectures capteurs + graphiques (15 par page)."""
+    page   = max(1, page)
+    offset = (page - 1) * LOGS_PER_PAGE
+
+    svc   = AlertService(db)
+    logs  = svc.get_logs(sensor=sensor or None, limit=LOGS_PER_PAGE, offset=offset)
+    total = len(svc.get_logs(sensor=sensor or None, limit=10000))
+    total_pages = max(1, (total + LOGS_PER_PAGE - 1) // LOGS_PER_PAGE)
+
+    # Données graphique : 60 dernières lectures pour le chart (indépendant de la page)
+    chart_logs = svc.get_logs(sensor=sensor or None, limit=60)
+
     return templates.TemplateResponse(request, "logs.html", {
-        "logs":   [l.to_dict() for l in logs],
-        "sensor": sensor,
+        "logs":        [l.to_dict() for l in logs],
+        "chart_logs":  [l.to_dict() for l in chart_logs],
+        "sensor":      sensor,
+        "page":        page,
+        "total_pages": total_pages,
+        "total":       total,
+        "has_prev":    page > 1,
+        "has_next":    page < total_pages,
+        "per_page":    LOGS_PER_PAGE,
     })
 
 

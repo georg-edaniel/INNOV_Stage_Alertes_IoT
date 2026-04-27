@@ -15,17 +15,20 @@
   {% endfor %}
 </div>
 
-<!-- Graphique temps réel avec horodatages -->
+<!-- Graphique horodatages réels -->
 <div class="chart-card" style="margin-bottom:1.5rem;">
-  <div class="chart-title">Évolution des valeurs — horodatages réels</div>
+  <div class="chart-title">Évolution des valeurs — 60 dernières lectures</div>
   <div style="position:relative;height:280px;"><canvas id="chartLine"></canvas></div>
 </div>
 
-<!-- Tableau -->
+<!-- Tableau paginé (15 par page) -->
 <div class="card">
   <div class="card-header">
-    <h3>{{ logs | length }} lecture(s)</h3>
-    <span style="font-size:.8rem;color:#999;">200 plus récentes · <a href="/api/logs?limit=200{% if sensor %}&sensor={{ sensor }}{% endif %}" target="_blank">JSON ↗</a></span>
+    <h3>{{ total }} lecture(s) · page {{ page }}/{{ total_pages }}</h3>
+    <span style="font-size:.8rem;color:#999;">
+      {{ per_page }} par page ·
+      <a href="/api/logs?limit=200{% if sensor %}&sensor={{ sensor }}{% endif %}" target="_blank">JSON ↗</a>
+    </span>
   </div>
   <div class="card-body">
     {% if logs %}
@@ -47,26 +50,38 @@
       </tbody>
     </table>
     {% else %}
-    <div class="empty">Aucune lecture pour l'instant — cliquez "Générer lecture" dans la sidebar.</div>
+    <div class="empty">Aucune lecture — cliquez "Générer lecture" dans la sidebar.</div>
     {% endif %}
   </div>
 </div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if has_prev %}
+  <a href="/logs?page={{ page - 1 }}{% if sensor %}&sensor={{ sensor }}{% endif %}" class="btn btn-outline btn-sm">← Précédent</a>
+  {% endif %}
+  <span class="page-info">Page {{ page }} sur {{ total_pages }} ({{ total }} lectures)</span>
+  {% if has_next %}
+  <a href="/logs?page={{ page + 1 }}{% if sensor %}&sensor={{ sensor }}{% endif %}" class="btn btn-outline btn-sm">Suivant →</a>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
-const logs    = {{ logs | tojson }};
-const sensors = ['temperature', 'turbidity', 'ph'];
-const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+// Utilise chart_logs (60 dernières) pour le graphique, indépendant de la pagination
+const chartData = {{ chart_logs | tojson }};
+const sensors   = ['temperature', 'turbidity', 'ph'];
+const colors    = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+const filter    = "{{ sensor or '' }}";
+const active    = filter ? [filter] : sensors;
 
-const filter = "{{ sensor or '' }}";
-const active  = filter ? [filter] : sensors;
-
-// Préparer les datasets avec vrais horodatages
 const datasets = active.map(s => {
-  const pts = logs.filter(l => l.sensor === s).slice(0, 60).reverse();
+  const pts = chartData.filter(l => l.sensor === s).slice(0, 60).reverse();
   return {
     label: s,
     data: pts.map(l => ({ x: new Date(l.created_at), y: l.value })),

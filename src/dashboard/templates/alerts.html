@@ -54,19 +54,41 @@
     <h3>{{ total }} alerte(s) — page {{ page }}/{{ total_pages }}</h3>
     <div class="btn-group">
       <button class="btn btn-warning btn-sm" onclick="ackAll()">Tout acquitter</button>
+      <button class="btn btn-outline btn-sm" onclick="openPdfModal()">⬇ Export PDF</button>
       <a href="/api/alerts/export{% if filters.sensor or filters.level or filters.resolved is not none %}?{% if filters.sensor %}sensor={{ filters.sensor }}&{% endif %}{% if filters.level %}level={{ filters.level }}&{% endif %}{% if filters.resolved is not none %}resolved={{ filters.resolved | lower }}{% endif %}{% endif %}"
          class="btn btn-outline btn-sm" download>⬇ Export CSV</a>
     </div>
   </div>
   <div class="card-body">
     {% if alerts %}
-    <table>
+    <table id="alerts-table">
       <thead>
-        <tr><th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau</th><th>Méthode</th><th>Z-score</th><th>Statut</th><th>Créée le</th><th>Actions</th></tr>
+        <tr>
+          <th data-col="id">#</th>
+          <th data-col="sensor">Capteur</th>
+          <th data-col="value">Valeur</th>
+          <th data-col="level">Niveau</th>
+          <th data-col="method">Méthode</th>
+          <th data-col="z_score">Z-score</th>
+          <th data-col="status">Statut</th>
+          <th data-col="reason">Raison</th>
+          <th data-col="created_at">Créée le</th>
+          <th data-col="resolved_at">Résolue le</th>
+        </tr>
       </thead>
       <tbody>
         {% for a in alerts %}
-        <tr id="row-{{ a.id }}" {% if a.resolved %}style="opacity:.5"{% endif %}>
+        <tr id="row-{{ a.id }}" {% if a.resolved %}style="opacity:.5"{% endif %}
+            data-id="{{ a.id }}"
+            data-sensor="{{ a.sensor }}"
+            data-value="{{ a.value }} {{ a.unit }}"
+            data-level="{{ a.level }}"
+            data-method="{{ a.method }}"
+            data-zscore="{{ '%.2f'|format(a.z_score) if a.z_score else '' }}"
+            data-status="{% if a.resolved %}Résolue{% elif a.acknowledged %}Acquittée{% else %}Ouverte{% endif %}"
+            data-reason="{{ a.reason }}"
+            data-created="{{ a.created_at[:19] | replace('T',' ') }}"
+            data-resolved="{{ a.resolved_at[:19] | replace('T',' ') if a.resolved_at else '' }}">
           <td><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
           <td><b>{{ a.sensor }}</b></td>
           <td>{{ a.value }} {{ a.unit }}</td>
@@ -78,15 +100,9 @@
             {% elif a.acknowledged %}<span class="badge badge-ack">Acquittée</span>
             {% else %}<span class="badge badge-warning">Ouverte</span>{% endif %}
           </td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
           <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.created_at[:19] | replace('T',' ') }}</td>
-          <td style="white-space:nowrap;">
-            {% if not a.acknowledged and not a.resolved %}
-            <button class="btn btn-sm btn-outline" onclick="ack({{ a.id }})">Ack</button>
-            {% endif %}
-            {% if not a.resolved %}
-            <button class="btn btn-sm btn-success" onclick="resolve({{ a.id }})">Résoudre</button>
-            {% endif %}
-          </td>
+          <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.resolved_at[:19] | replace('T',' ') if a.resolved_at else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -104,17 +120,96 @@
   <a href="/alerts?page={{ page - 1 }}{% if filters.sensor %}&sensor={{ filters.sensor }}{% endif %}{% if filters.level %}&level={{ filters.level }}{% endif %}{% if filters.resolved is not none %}&resolved={{ filters.resolved | lower }}{% endif %}"
      class="btn btn-outline btn-sm">← Précédent</a>
   {% endif %}
-  <span class="page-info">Page {{ page }} sur {{ total_pages }} ({{ total }} alertes)</span>
+  <span class="page-info">Page {{ page }} sur {{ total_pages }} · {{ total }} alertes</span>
   {% if has_next %}
   <a href="/alerts?page={{ page + 1 }}{% if filters.sensor %}&sensor={{ filters.sensor }}{% endif %}{% if filters.level %}&level={{ filters.level }}{% endif %}{% if filters.resolved is not none %}&resolved={{ filters.resolved | lower }}{% endif %}"
      class="btn btn-outline btn-sm">Suivant →</a>
   {% endif %}
 </div>
 {% endif %}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Modal PDF
+═══════════════════════════════════════════════════════════════════ -->
+<div id="pdf-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--card);border-radius:var(--radius);padding:2rem;max-width:520px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto;">
+
+    <h3 style="margin-bottom:1.2rem;font-size:1.1rem;">⬇ Exporter en PDF</h3>
+
+    <!-- Titre du PDF -->
+    <div style="margin-bottom:1rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.3rem;">TITRE DU DOCUMENT</label>
+      <input type="text" id="pdf-title" value="Rapport Alertes IoT — INNOV/CCNB"
+             style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;font-size:.88rem;background:var(--bg);color:var(--text);">
+    </div>
+
+    <!-- Source des données -->
+    <div style="margin-bottom:1rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.5rem;">DONNÉES À INCLURE</label>
+      <div style="display:flex;flex-direction:column;gap:.4rem;">
+        <label class="pdf-radio" style="display:flex;align-items:center;gap:.6rem;font-size:.88rem;cursor:pointer;">
+          <input type="radio" name="pdf-scope" value="page" checked> Page actuelle ({{ alerts | length }} alertes affichées)
+        </label>
+        <label class="pdf-radio" style="display:flex;align-items:center;gap:.6rem;font-size:.88rem;cursor:pointer;">
+          <input type="radio" name="pdf-scope" value="all"> Toutes les alertes ({{ stats.total }} au total)
+        </label>
+        <label class="pdf-radio" style="display:flex;align-items:center;gap:.6rem;font-size:.88rem;cursor:pointer;">
+          <input type="radio" name="pdf-scope" value="open"> Alertes ouvertes uniquement ({{ stats.open }})
+        </label>
+        <label class="pdf-radio" style="display:flex;align-items:center;gap:.6rem;font-size:.88rem;cursor:pointer;">
+          <input type="radio" name="pdf-scope" value="critical"> Critiques uniquement ({{ stats.critical }})
+        </label>
+      </div>
+    </div>
+
+    <!-- Colonnes à inclure -->
+    <div style="margin-bottom:1.2rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.5rem;">COLONNES</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.35rem;">
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="id"         checked> #&nbsp;ID</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="sensor"     checked> Capteur</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="value"      checked> Valeur</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="level"      checked> Niveau</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="method"     checked> Méthode</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="z_score">   Z-score</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="status"     checked> Statut</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="reason"     checked> Raison</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="created_at" checked> Créée le</label>
+        <label class="pdf-check" style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;"><input type="checkbox" name="pdf-col" value="resolved_at"> Résolue le</label>
+      </div>
+      <div style="margin-top:.5rem;display:flex;gap:.5rem;">
+        <button class="btn btn-outline btn-sm" onclick="toggleAllCols(true)">Tout sélectionner</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllCols(false)">Tout décocher</button>
+      </div>
+    </div>
+
+    <!-- Options supplémentaires -->
+    <div style="margin-bottom:1.4rem;">
+      <label style="font-size:.8rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.5rem;">OPTIONS</label>
+      <label style="display:flex;align-items:center;gap:.6rem;font-size:.85rem;cursor:pointer;margin-bottom:.3rem;">
+        <input type="checkbox" id="pdf-include-stats" checked> Inclure le bloc statistiques
+      </label>
+      <label style="display:flex;align-items:center;gap:.6rem;font-size:.85rem;cursor:pointer;">
+        <input type="checkbox" id="pdf-include-date" checked> Afficher la date de génération
+      </label>
+    </div>
+
+    <!-- Boutons -->
+    <div style="display:flex;gap:.7rem;justify-content:flex-end;">
+      <button class="btn btn-outline" onclick="closePdfModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="generatePdf()" id="pdf-gen-btn">📄 Générer PDF</button>
+    </div>
+    <div id="pdf-status" style="font-size:.8rem;color:var(--muted);margin-top:.6rem;text-align:center;min-height:1rem;"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<!-- jsPDF + AutoTable (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
+// ── Actions tableau ────────────────────────────────────────────
 async function ack(id) {
   await fetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' });
   location.reload();
@@ -127,6 +222,200 @@ async function resolve(id) {
 async function ackAll() {
   await fetch('/api/alerts/acknowledge-all', { method: 'PATCH' });
   location.reload();
+}
+
+// ── Modal PDF ──────────────────────────────────────────────────
+function openPdfModal() {
+  const m = document.getElementById('pdf-modal');
+  m.style.display = 'flex';
+}
+function closePdfModal() {
+  document.getElementById('pdf-modal').style.display = 'none';
+}
+// Fermer en cliquant dehors
+document.getElementById('pdf-modal').addEventListener('click', function(e) {
+  if (e.target === this) closePdfModal();
+});
+
+function toggleAllCols(checked) {
+  document.querySelectorAll('input[name="pdf-col"]').forEach(c => c.checked = checked);
+}
+
+// ── Colonnes disponibles ───────────────────────────────────────
+const COL_DEFS = {
+  id:          { label: '#',          key: 'id' },
+  sensor:      { label: 'Capteur',    key: 'sensor' },
+  value:       { label: 'Valeur',     key: 'value' },
+  level:       { label: 'Niveau',     key: 'level' },
+  method:      { label: 'Méthode',    key: 'method' },
+  z_score:     { label: 'Z-score',    key: 'zscore' },
+  status:      { label: 'Statut',     key: 'status' },
+  reason:      { label: 'Raison',     key: 'reason' },
+  created_at:  { label: 'Créée le',   key: 'created' },
+  resolved_at: { label: 'Résolue le', key: 'resolved' },
+};
+
+// Lire les data-attributes de chaque ligne du tableau
+function getTableRows() {
+  return Array.from(document.querySelectorAll('#alerts-table tbody tr')).map(tr => ({
+    id:       tr.dataset.id,
+    sensor:   tr.dataset.sensor,
+    value:    tr.dataset.value,
+    level:    tr.dataset.level,
+    method:   tr.dataset.method,
+    zscore:   tr.dataset.zscore || '—',
+    status:   tr.dataset.status,
+    reason:   tr.dataset.reason,
+    created:  tr.dataset.created,
+    resolved: tr.dataset.resolved || '—',
+  }));
+}
+
+// Charger toutes les alertes depuis l'API
+async function fetchAlerts(scope) {
+  let url;
+  if (scope === 'all')      url = '/api/alerts?limit=2000';
+  else if (scope === 'open')     url = '/api/alerts?limit=2000&resolved=false';
+  else if (scope === 'critical') url = '/api/alerts?limit=2000&level=CRITICAL';
+  else return null; // page actuelle = tableau déjà chargé
+
+  const r    = await fetch(url);
+  const data = await r.json();
+  return data.alerts.map(a => ({
+    id:       String(a.id),
+    sensor:   a.sensor,
+    value:    `${a.value} ${a.unit}`,
+    level:    a.level,
+    method:   a.method,
+    zscore:   a.z_score ? a.z_score.toFixed(2) : '—',
+    status:   a.resolved ? 'Résolue' : a.acknowledged ? 'Acquittée' : 'Ouverte',
+    reason:   a.reason,
+    created:  a.created_at ? a.created_at.slice(0,19).replace('T',' ') : '—',
+    resolved: a.resolved_at ? a.resolved_at.slice(0,19).replace('T',' ') : '—',
+  }));
+}
+
+async function generatePdf() {
+  const btn    = document.getElementById('pdf-gen-btn');
+  const status = document.getElementById('pdf-status');
+  btn.disabled = true;
+  btn.textContent = 'Génération...';
+  status.textContent = '';
+
+  try {
+    // 1. Colonnes sélectionnées
+    const selCols = Array.from(document.querySelectorAll('input[name="pdf-col"]:checked')).map(c => c.value);
+    if (selCols.length === 0) { status.textContent = '⚠ Sélectionnez au moins une colonne.'; return; }
+
+    // 2. Données
+    const scope = document.querySelector('input[name="pdf-scope"]:checked').value;
+    let rows;
+    if (scope === 'page') {
+      rows = getTableRows();
+    } else {
+      status.textContent = 'Chargement des données...';
+      rows = await fetchAlerts(scope);
+    }
+
+    if (!rows || rows.length === 0) { status.textContent = '⚠ Aucune donnée à exporter.'; return; }
+
+    // 3. Construire le PDF
+    const { jsPDF } = window.jspdf;
+    const doc  = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const now  = new Date().toLocaleString('fr-CA');
+    const title = document.getElementById('pdf-title').value || 'Rapport Alertes IoT';
+
+    // En-tête
+    doc.setFontSize(16);
+    doc.setTextColor(26, 92, 156);
+    doc.text(title, 14, 18);
+
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 120);
+    if (document.getElementById('pdf-include-date').checked) {
+      doc.text(`Généré le ${now} · ${rows.length} alertes`, 14, 25);
+    }
+
+    let yStart = 30;
+
+    // Bloc statistiques
+    if (document.getElementById('pdf-include-stats').checked) {
+      const stats = [
+        ['Total', '{{ stats.total }}'],
+        ['Critical', '{{ stats.critical }}'],
+        ['Warning', '{{ stats.warning }}'],
+        ['Résolues', '{{ stats.resolved }}'],
+        ['Acquittées', '{{ stats.acknowledged }}'],
+      ];
+      doc.autoTable({
+        startY: yStart,
+        head: [['Statistique', 'Valeur']],
+        body: stats,
+        theme: 'grid',
+        headStyles: { fillColor: [26, 92, 156], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 0: { cellWidth: 35 }, 1: { cellWidth: 20 } },
+        margin: { left: 14 },
+        tableWidth: 60,
+      });
+      yStart = doc.lastAutoTable.finalY + 8;
+    }
+
+    // Tableau principal
+    const headers = selCols.map(c => COL_DEFS[c].label);
+    const body    = rows.map(r => selCols.map(c => r[COL_DEFS[c].key] || ''));
+
+    // Couleurs niveau
+    const levelColors = { CRITICAL: [231, 76, 60], WARNING: [243, 156, 18], NORMAL: [39, 174, 96] };
+
+    doc.autoTable({
+      startY: yStart,
+      head: [headers],
+      body,
+      theme: 'striped',
+      headStyles: { fillColor: [26, 92, 156], fontSize: 8, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 7.5, overflow: 'linebreak' },
+      alternateRowStyles: { fillColor: [245, 248, 252] },
+      columnStyles: {
+        [selCols.indexOf('reason')]: { cellWidth: 60 },
+      },
+      margin: { left: 14, right: 14 },
+      didParseCell: function(data) {
+        if (data.section === 'body') {
+          const levelIdx = selCols.indexOf('level');
+          if (levelIdx !== -1 && data.column.index === levelIdx) {
+            const lvl = data.cell.raw;
+            const c   = levelColors[lvl];
+            if (c) {
+              data.cell.styles.textColor = c;
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      },
+    });
+
+    // Pied de page
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150);
+      doc.text(`INNOV/CCNB · IoT Alert System · Page ${i}/${pageCount}`, 14, doc.internal.pageSize.height - 8);
+    }
+
+    // Télécharger
+    const fname = `alertes_${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(fname);
+    status.textContent = `✓ ${fname} téléchargé`;
+
+  } catch(e) {
+    status.textContent = '✗ Erreur : ' + e.message;
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📄 Générer PDF';
+  }
 }
 </script>
 {% endblock %}
