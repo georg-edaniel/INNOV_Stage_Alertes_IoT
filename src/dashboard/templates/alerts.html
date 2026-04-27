@@ -295,6 +295,23 @@ async function fetchAlerts(scope) {
   }));
 }
 
+// Charger le logo INNOV en base64 (mis en cache après le premier appel)
+let _logoB64 = null;
+async function loadLogo() {
+  if (_logoB64) return _logoB64;
+  try {
+    const r    = await fetch('/static/innov_logo.png');
+    const blob = await r.blob();
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onloadend = () => { _logoB64 = reader.result; resolve(_logoB64); };
+      reader.readAsDataURL(blob);
+    });
+  } catch (_) { return null; }
+}
+// Précharger dès le chargement de la page
+loadLogo();
+
 async function generatePdf() {
   const btn    = document.getElementById('pdf-gen-btn');
   const status = document.getElementById('pdf-status');
@@ -321,22 +338,35 @@ async function generatePdf() {
 
     // 3. Construire le PDF
     const { jsPDF } = window.jspdf;
-    const doc  = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const now  = new Date().toLocaleString('fr-CA');
+    const doc   = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.width;
+    const now   = new Date().toLocaleString('fr-CA');
     const title = document.getElementById('pdf-title').value || 'Rapport Alertes IoT';
 
-    // En-tête
-    doc.setFontSize(16);
-    doc.setTextColor(26, 92, 156);
-    doc.text(title, 14, 18);
-
-    doc.setFontSize(9);
-    doc.setTextColor(120, 120, 120);
-    if (document.getElementById('pdf-include-date').checked) {
-      doc.text(`Généré le ${now} · ${rows.length} alertes`, 14, 25);
+    // ── En-tête avec logo ──────────────────────────────────────
+    const logo = await loadLogo();
+    if (logo) {
+      // Logo INNOV à droite, hauteur 12mm
+      doc.addImage(logo, 'PNG', pageW - 50, 6, 36, 12, undefined, 'FAST');
     }
 
-    let yStart = 30;
+    // Ligne de séparation
+    doc.setDrawColor(26, 92, 156);
+    doc.setLineWidth(0.5);
+    doc.line(14, 22, pageW - 14, 22);
+
+    // Titre
+    doc.setFontSize(15);
+    doc.setTextColor(26, 92, 156);
+    doc.text(title, 14, 17);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(120, 120, 120);
+    if (document.getElementById('pdf-include-date').checked) {
+      doc.text(`Généré le ${now} · ${rows.length} alerte(s)`, 14, 27);
+    }
+
+    let yStart = 32;
 
     // Bloc statistiques
     if (document.getElementById('pdf-include-stats').checked) {
@@ -395,13 +425,18 @@ async function generatePdf() {
       },
     });
 
-    // Pied de page
+    // Pied de page (toutes les pages)
     const pageCount = doc.internal.getNumberOfPages();
+    const pH = doc.internal.pageSize.height;
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.3);
+      doc.line(14, pH - 12, pageW - 14, pH - 12);
       doc.setFontSize(7);
-      doc.setTextColor(150);
-      doc.text(`INNOV/CCNB · IoT Alert System · Page ${i}/${pageCount}`, 14, doc.internal.pageSize.height - 8);
+      doc.setTextColor(160, 160, 160);
+      doc.text(`INNOV / CCNB — IoT Alert System`, 14, pH - 7);
+      doc.text(`Page ${i} / ${pageCount}`, pageW - 14, pH - 7, { align: 'right' });
     }
 
     // Télécharger
