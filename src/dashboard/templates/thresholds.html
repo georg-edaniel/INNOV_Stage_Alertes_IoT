@@ -47,6 +47,47 @@
 <div style="margin-top:1rem;">
   <button class="btn btn-danger btn-sm" onclick="resetAll()">🔄 Réinitialiser tout aux valeurs par défaut</button>
 </div>
+
+<!-- Webhook Notifications -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>🔔 Notifications Webhook</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Envoie une notification lors de chaque alerte CRITICAL. Compatible Slack, Discord et webhooks génériques.</p>
+    <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:.8rem;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">URL du webhook</label>
+        <input type="url" id="wh-url" placeholder="https://hooks.slack.com/…"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Format</label>
+        <select id="wh-format" style="padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="generic">Générique</option>
+          <option value="slack">Slack</option>
+          <option value="discord">Discord</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Actif</label>
+        <input type="checkbox" id="wh-active" style="width:20px;height:20px;cursor:pointer;">
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="saveWebhook()">💾 Enregistrer</button>
+      </div>
+    </div>
+    <div id="wh-status" style="font-size:.8rem;margin-top:.6rem;color:var(--muted);"></div>
+  </div>
+</div>
+
+<!-- Historique des changements de seuils -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>📜 Historique des modifications de seuils</h3></div>
+  <div class="card-body" style="padding:0;">
+    <div id="history-container">
+      <div style="padding:1rem;color:var(--muted);font-size:.88rem;">Chargement…</div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -103,5 +144,61 @@ window.addEventListener('beforeunload', e => {
     e.returnValue = '';
   }
 });
+
+// ── Webhook ────────────────────────────────────────────────────
+(async () => {
+  const cfg = await fetch('/api/config/webhook').then(r => r.json());
+  document.getElementById('wh-url').value    = cfg.url    || '';
+  document.getElementById('wh-active').checked = cfg.active || false;
+  const sel = document.getElementById('wh-format');
+  if (cfg.format) sel.value = cfg.format;
+})();
+
+async function saveWebhook() {
+  const url    = document.getElementById('wh-url').value.trim();
+  const active = document.getElementById('wh-active').checked;
+  const format = document.getElementById('wh-format').value;
+  const st     = document.getElementById('wh-status');
+  st.textContent = 'Sauvegarde...';
+  const r = await fetch(`/api/config/webhook?url=${encodeURIComponent(url)}&active=${active}&format=${format}`, { method: 'POST' });
+  if (r.ok) {
+    st.textContent = '✓ Webhook enregistré';
+    st.style.color = 'var(--success)';
+  } else {
+    st.textContent = '✗ Erreur';
+    st.style.color = 'var(--critical)';
+  }
+  setTimeout(() => st.textContent = '', 3000);
+}
+
+// ── Historique seuils ──────────────────────────────────────────
+(async () => {
+  const d   = await fetch('/api/config/thresholds/history?limit=20').then(r => r.json());
+  const con = document.getElementById('history-container');
+  if (!d.history.length) {
+    con.innerHTML = '<div style="padding:1rem;color:var(--muted);font-size:.88rem;">Aucune modification enregistrée.</div>';
+    return;
+  }
+  let html = '<table style="width:100%;font-size:.82rem;border-collapse:collapse;">';
+  html += '<thead><tr style="border-bottom:1px solid var(--border);">';
+  ['Horodatage','Capteur','Zone','Avant','Après'].forEach(h => {
+    html += `<th style="padding:.5rem .8rem;text-align:left;font-weight:600;">${h}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  d.history.forEach((e, i) => {
+    const bg = i % 2 === 0 ? 'var(--bg)' : 'var(--sidebar-bg,#f5f6fa)';
+    const ts = e.timestamp.replace('T',' ').slice(0,19);
+    const fmtZone = v => v && typeof v === 'object' ? `min ${v.min ?? '—'} / max ${v.max ?? '—'}` : JSON.stringify(v);
+    html += `<tr style="background:${bg};border-bottom:1px solid var(--border);">
+      <td style="padding:.4rem .8rem;white-space:nowrap;color:var(--muted);">${ts}</td>
+      <td style="padding:.4rem .8rem;">${e.sensor}</td>
+      <td style="padding:.4rem .8rem;">${e.zone}</td>
+      <td style="padding:.4rem .8rem;color:var(--critical);">${fmtZone(e.old)}</td>
+      <td style="padding:.4rem .8rem;color:var(--success);">${fmtZone(e.new)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  con.innerHTML = html;
+})();
 </script>
 {% endblock %}

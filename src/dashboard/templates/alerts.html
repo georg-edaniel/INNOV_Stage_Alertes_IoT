@@ -33,6 +33,18 @@
         <option value="true"  {% if filters.resolved == True  %}selected{% endif %}>Résolues</option>
       </select>
     </div>
+    <div class="filter-group">
+      <label>Recherche</label>
+      <input type="text" name="q" value="{{ filters.q or '' }}" placeholder="Mot-clé dans la raison…" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group">
+      <label>Date début</label>
+      <input type="date" name="date_from" value="{{ filters.date_from or '' }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group">
+      <label>Date fin</label>
+      <input type="date" name="date_to" value="{{ filters.date_to or '' }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
     <div class="filter-group" style="align-self:flex-end;">
       <button type="submit" class="btn btn-primary">Filtrer</button>
       <a href="/alerts" class="btn btn-outline">Reset</a>
@@ -55,6 +67,7 @@
     <div class="btn-group">
       <button class="btn btn-warning btn-sm" onclick="ackAll()">Tout acquitter</button>
       <button class="btn btn-outline btn-sm" onclick="openPdfModal()">⬇ Export PDF</button>
+      <button class="btn btn-outline btn-sm" onclick="exportExcel()">⬇ Export Excel</button>
       <a href="/api/alerts/export{% if filters.sensor or filters.level or filters.resolved is not none %}?{% if filters.sensor %}sensor={{ filters.sensor }}&{% endif %}{% if filters.level %}level={{ filters.level }}&{% endif %}{% if filters.resolved is not none %}resolved={{ filters.resolved | lower }}{% endif %}{% endif %}"
          class="btn btn-outline btn-sm" download>⬇ Export CSV</a>
     </div>
@@ -66,6 +79,7 @@
         <tr>
           <th data-col="id">#</th>
           <th data-col="sensor">Capteur</th>
+          <th>Tendance</th>
           <th data-col="value">Valeur</th>
           <th data-col="level">Niveau</th>
           <th data-col="method">Méthode</th>
@@ -74,6 +88,7 @@
           <th data-col="reason">Raison</th>
           <th data-col="created_at">Créée le</th>
           <th data-col="resolved_at">Résolue le</th>
+          <th>Tags</th>
         </tr>
       </thead>
       <tbody>
@@ -91,6 +106,7 @@
             data-resolved="{{ a.resolved_at[:19] | replace('T',' ') if a.resolved_at else '' }}">
           <td><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
           <td><b>{{ a.sensor }}</b></td>
+          <td style="padding:.4rem .6rem;"><canvas class="sparkline" data-sensor="{{ a.sensor }}" width="80" height="28"></canvas></td>
           <td>{{ a.value }} {{ a.unit }}</td>
           <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
           <td>{{ a.method }}</td>
@@ -103,6 +119,13 @@
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
           <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.created_at[:19] | replace('T',' ') }}</td>
           <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.resolved_at[:19] | replace('T',' ') if a.resolved_at else '—' }}</td>
+          <td>
+            {% if a.tags %}
+              {% for tag in a.tags.split(',') %}
+                <span style="display:inline-block;font-size:.7rem;padding:.1rem .4rem;border-radius:4px;background:var(--border);margin:.1rem;">{{ tag }}</span>
+              {% endfor %}
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -205,9 +228,10 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- jsPDF + AutoTable (CDN) -->
+<!-- jsPDF + AutoTable + SheetJS (CDN) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ── Actions tableau ────────────────────────────────────────────
 async function ack(id) {
@@ -452,5 +476,88 @@ async function generatePdf() {
     btn.textContent = '📄 Générer PDF';
   }
 }
+
+// ── Export Excel ───────────────────────────────────────────────
+function exportExcel() {
+  const rows = getTableRows();
+  if (!rows.length) { alert('Aucune donnée à exporter.'); return; }
+
+  const wsData = [
+    ['#', 'Capteur', 'Valeur', 'Niveau', 'Méthode', 'Z-score', 'Statut', 'Raison', 'Créée le', 'Résolue le'],
+    ...rows.map(r => [r.id, r.sensor, r.value, r.level, r.method, r.zscore, r.status, r.reason, r.created, r.resolved])
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [
+    {wch:6},{wch:14},{wch:14},{wch:10},{wch:18},
+    {wch:9},{wch:12},{wch:50},{wch:18},{wch:18}
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, 'Alertes');
+
+  const fname = `alertes_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+}
+
+// ── Sparklines ────────────────────────────────────────────────
+let _sparkData = {};
+
+async function loadSparkData() {
+  try {
+    const r = await fetch('/api/logs?limit=150');
+    const d = await r.json();
+    _sparkData = {};
+    for (const l of d.logs) {
+      if (!_sparkData[l.sensor]) _sparkData[l.sensor] = [];
+      _sparkData[l.sensor].push(l.value);
+    }
+    // logs are newest-first → reverse to get chronological order, keep last 20
+    for (const s in _sparkData) {
+      _sparkData[s] = _sparkData[s].slice(0, 20).reverse();
+    }
+    drawSparklines();
+  } catch(e) { console.warn('Sparklines:', e); }
+}
+
+function drawSparkline(canvas, values) {
+  if (!values || values.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = W / (values.length - 1);
+  const py = v => H - 2 - ((v - min) / range) * (H - 6);
+
+  // Filled area
+  ctx.beginPath();
+  ctx.moveTo(0, py(values[0]));
+  for (let i = 1; i < values.length; i++) ctx.lineTo(i * step, py(values[i]));
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = 'rgba(26,92,156,.15)';
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(0, py(values[0]));
+  for (let i = 1; i < values.length; i++) ctx.lineTo(i * step, py(values[i]));
+  ctx.strokeStyle = '#1a5c9c'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // Last point dot
+  ctx.beginPath();
+  ctx.arc((values.length - 1) * step, py(values[values.length - 1]), 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#1a5c9c'; ctx.fill();
+}
+
+function drawSparklines() {
+  document.querySelectorAll('.sparkline').forEach(canvas => {
+    const values = _sparkData[canvas.dataset.sensor];
+    if (values) drawSparkline(canvas, values);
+  });
+}
+
+loadSparkData();
 </script>
 {% endblock %}

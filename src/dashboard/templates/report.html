@@ -9,6 +9,7 @@
     <a href="/report?days=1"  class="btn {% if days==1 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">24 h</a>
     <a href="/report?days=7"  class="btn {% if days==7 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">7 j</a>
     <a href="/report?days=30" class="btn {% if days==30 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">30 j</a>
+    <button class="btn btn-outline btn-sm" onclick="exportReportPdf()">⬇ Export PDF</button>
   </div>
 </h1>
 
@@ -17,7 +18,7 @@
 </div>
 
 <!-- KPIs globaux -->
-<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
+<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:1.5rem;">
   <div class="kpi-card critical">
     <div class="kpi-label">Total alertes</div>
     <div class="kpi-value">{{ report.total_alerts }}</div>
@@ -36,6 +37,16 @@
       {% else %}—{% endif %}
     </div>
     <div class="kpi-sub">alertes / lectures</div>
+  </div>
+  <div class="kpi-card critical" id="kpi-open-critical">
+    <div class="kpi-label">Durée moy. ouvertes CRITICAL</div>
+    <div class="kpi-value" id="dur-critical">—</div>
+    <div class="kpi-sub">non résolues</div>
+  </div>
+  <div class="kpi-card warning" id="kpi-open-warning">
+    <div class="kpi-label">Durée moy. ouvertes WARNING</div>
+    <div class="kpi-value" id="dur-warning">—</div>
+    <div class="kpi-sub">non résolues</div>
   </div>
 </div>
 
@@ -105,14 +116,49 @@
     <div class="chart-wrap"><canvas id="chartResolution"></canvas></div>
   </div>
 </div>
+
+<!-- Heatmap des anomalies par heure -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>🔥 Heatmap des anomalies par heure</h3></div>
+  <div class="card-body" style="padding:1.2rem;overflow-x:auto;">
+    <div id="heatmap-container">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem;">Chargement…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Corrélation inter-capteurs -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header">
+    <h3>📊 Corrélation inter-capteurs</h3>
+    <div style="display:flex;gap:.5rem;align-items:center;font-size:.85rem;">
+      Axe X : <select id="corr-x" onchange="updateCorr()" style="padding:.2rem .4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+        <option value="temperature">Température</option>
+        <option value="turbidity">Turbidité</option>
+        <option value="ph">pH</option>
+      </select>
+      Axe Y : <select id="corr-y" onchange="updateCorr()" style="padding:.2rem .4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+        <option value="turbidity">Turbidité</option>
+        <option value="temperature">Température</option>
+        <option value="ph">pH</option>
+      </select>
+    </div>
+  </div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div style="position:relative;height:260px;"><canvas id="chartCorr"></canvas></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
 const sensors = ['temperature', 'turbidity', 'ph'];
 const colors  = ['#1a5c9c', '#8e44ad', '#16a085'];
 const data    = {{ report.by_sensor | tojson }};
+const days    = {{ days }};
 
 // Alertes par capteur (stacked bar)
 new Chart(document.getElementById('chartBySensor'), {
@@ -144,5 +190,148 @@ new Chart(document.getElementById('chartResolution'), {
   },
   options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
 });
+
+// ── Durée moyenne alertes ouvertes ────────────────────────────
+function fmtSec(s) {
+  if (!s) return '—';
+  s = Math.round(s);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+fetch(`/api/logs/open-duration?days=${days}`)
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('dur-critical').textContent = fmtSec(d.CRITICAL);
+    document.getElementById('dur-warning').textContent  = fmtSec(d.WARNING);
+  });
+
+// ── Heatmap ───────────────────────────────────────────────────
+const DAYS_FR  = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const HOURS    = Array.from({length:24}, (_, i) => i);
+
+fetch(`/api/logs/heatmap?days=${days}`)
+  .then(r => r.json())
+  .then(d => {
+    const grid = d.grid;
+    const maxVal = Math.max(1, ...grid.flat());
+    let html = '<table style="border-collapse:collapse;font-size:.72rem;">';
+    // En-tête heures
+    html += '<tr><td style="padding:.2rem .4rem;"></td>';
+    HOURS.forEach(h => {
+      html += `<td style="text-align:center;padding:.1rem .3rem;color:var(--muted);">${h}h</td>`;
+    });
+    html += '</tr>';
+    // Lignes jours
+    grid.forEach((row, wi) => {
+      html += `<tr><td style="padding:.2rem .5rem;white-space:nowrap;color:var(--muted);">${DAYS_FR[wi]}</td>`;
+      row.forEach(val => {
+        const intensity = val / maxVal;
+        const r = Math.round(26 + intensity * (231 - 26));
+        const g = Math.round(92 + intensity * (76 - 92));
+        const b = Math.round(156 + intensity * (60 - 156));
+        const bg = val === 0 ? 'var(--border)' : `rgb(${r},${g},${b})`;
+        const fg = intensity > 0.5 ? '#fff' : 'var(--text)';
+        html += `<td title="${val} anomalie(s)" style="width:24px;height:20px;text-align:center;background:${bg};color:${fg};border-radius:3px;margin:1px;">${val || ''}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</table>';
+    html += `<div style="font-size:.75rem;color:var(--muted);margin-top:.5rem;">Total : ${d.total} anomalies sur ${days} jour(s)</div>`;
+    document.getElementById('heatmap-container').innerHTML = html;
+  });
+
+// ── Corrélation inter-capteurs ────────────────────────────────
+let _corrData = null;
+let _corrChart = null;
+
+fetch(`/api/logs/correlation?days=${days}`)
+  .then(r => r.json())
+  .then(d => { _corrData = d.points; updateCorr(); });
+
+function updateCorr() {
+  if (!_corrData) return;
+  const sx = document.getElementById('corr-x').value;
+  const sy = document.getElementById('corr-y').value;
+  const pts = _corrData.map(p => ({ x: p[sx], y: p[sy] }));
+  if (_corrChart) _corrChart.destroy();
+  _corrChart = new Chart(document.getElementById('chartCorr'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: `${sx} vs ${sy}`,
+        data: pts,
+        backgroundColor: '#1a5c9c44',
+        borderColor: '#1a5c9c',
+        pointRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: sx } },
+        y: { title: { display: true, text: sy } },
+      }
+    }
+  });
+}
+
+// ── Export PDF du rapport ─────────────────────────────────────
+async function exportReportPdf() {
+  const { jsPDF } = window.jspdf;
+  const doc    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW  = doc.internal.pageSize.width;
+  const now    = new Date().toLocaleString('fr-CA');
+
+  // Tenter de charger le logo
+  let logo = null;
+  try {
+    const r = await fetch('/static/innov_logo.png');
+    const blob = await r.blob();
+    logo = await new Promise(res => { const rd = new FileReader(); rd.onloadend = () => res(rd.result); rd.readAsDataURL(blob); });
+  } catch(_) {}
+
+  if (logo) doc.addImage(logo, 'PNG', pageW - 50, 6, 36, 12, undefined, 'FAST');
+  doc.setDrawColor(26, 92, 156); doc.setLineWidth(0.5); doc.line(14, 22, pageW - 14, 22);
+  doc.setFontSize(14); doc.setTextColor(26, 92, 156);
+  doc.text(`Rapport IoT — ${days} jour(s)`, 14, 17);
+  doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+  doc.text(`Généré le ${now}`, 14, 28);
+
+  // KPIs globaux
+  const kpiRows = [
+    ['Métrique', 'Valeur'],
+    ['Total alertes', '{{ report.total_alerts }}'],
+    ['Total lectures', '{{ report.total_readings }}'],
+    ['Taux anomalie', '{{ "%.1f"|format(report.total_alerts / report.total_readings * 100) if report.total_readings > 0 else "—" }} %'],
+  ];
+  doc.autoTable({ head: [kpiRows[0]], body: kpiRows.slice(1), startY: 34, theme: 'striped',
+    headStyles: { fillColor: [26,92,156] }, margin: { left: 14, right: 14 } });
+
+  // Par capteur
+  const sensorRows = sensors.map(s => [
+    s,
+    data[s].total_alerts,
+    data[s].critical_alerts,
+    data[s].warning_alerts,
+    data[s].resolved_alerts,
+    data[s].readings_count,
+    data[s].avg_value ?? '—',
+  ]);
+  doc.autoTable({
+    head: [['Capteur','Alertes','Critical','Warning','Résolues','Lectures','Moy.']],
+    body: sensorRows,
+    startY: doc.lastAutoTable.finalY + 6,
+    theme: 'striped',
+    headStyles: { fillColor: [26,92,156] },
+    margin: { left: 14, right: 14 },
+  });
+
+  const ph = doc.internal.pageSize.height;
+  doc.setFontSize(7); doc.setTextColor(160,160,160);
+  doc.text('INNOV / CCNB — IoT Alert System', 14, ph - 7);
+  doc.save(`rapport_iot_${days}j_${new Date().toISOString().slice(0,10)}.pdf`);
+}
 </script>
 {% endblock %}

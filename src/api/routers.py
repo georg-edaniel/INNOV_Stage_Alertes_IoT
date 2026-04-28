@@ -63,17 +63,28 @@ def export_alerts_csv(
 
 @alerts_router.get("")
 def list_alerts(
-    sensor:   str | None  = Query(None),
-    level:    str | None  = Query(None),
-    resolved: bool | None = Query(None),
+    sensor:    str | None  = Query(None),
+    level:     str | None  = Query(None),
+    resolved:  bool | None = Query(None),
+    date_from: str | None  = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to:   str | None  = Query(None, description="ISO date YYYY-MM-DD"),
+    q:         str | None  = Query(None, description="Recherche dans la raison"),
     limit:  int = Query(50,  ge=1, le=200),
     offset: int = Query(0,   ge=0),
     db: Session = Depends(get_db),
 ):
     """Liste les alertes avec filtres optionnels."""
+    from datetime import datetime, timezone, timedelta
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
     svc    = AlertService(db)
-    alerts = svc.get_all(sensor=sensor, level=level, resolved=resolved, limit=limit, offset=offset)
-    return {"alerts": [a.to_dict() for a in alerts], "count": len(alerts)}
+    alerts = svc.get_all(
+        sensor=sensor, level=level, resolved=resolved,
+        date_from=df, date_to=dt, search=q,
+        limit=limit, offset=offset,
+    )
+    total = svc.count_all(sensor=sensor, level=level, resolved=resolved, date_from=df, date_to=dt, search=q)
+    return {"alerts": [a.to_dict() for a in alerts], "count": len(alerts), "total": total}
 
 
 @alerts_router.get("/open")
@@ -107,6 +118,25 @@ def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
     return {"message": "Alerte résolue", "alert": alert.to_dict()}
 
 
+@alerts_router.patch("/{alert_id}/notes")
+def update_note(alert_id: int, note: str = "", db: Session = Depends(get_db)):
+    """Ajoute ou met à jour la note opérateur d'une alerte."""
+    alert = AlertService(db).add_note(alert_id, note)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": "Note enregistrée", "alert": alert.to_dict()}
+
+
+@alerts_router.patch("/{alert_id}/tags")
+def update_tags(alert_id: int, tags: str = Query("", description="Tags séparés par virgules"), db: Session = Depends(get_db)):
+    """Définit les tags d'une alerte."""
+    tag_list = [t for t in tags.split(",") if t.strip()]
+    alert = AlertService(db).set_tags(alert_id, tag_list)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": "Tags enregistrés", "alert": alert.to_dict()}
+
+
 @alerts_router.patch("/acknowledge-all")
 def acknowledge_all(db: Session = Depends(get_db)):
     count = AlertService(db).acknowledge_all()
@@ -127,16 +157,41 @@ def get_mttr(db: Session = Depends(get_db)):
     return AlertService(db).get_mttr()
 
 
+@logs_router.get("/heatmap")
+def get_heatmap(days: int = Query(7, ge=1, le=30), db: Session = Depends(get_db)):
+    """Heatmap des anomalies par heure/jour sur les N derniers jours."""
+    return AlertService(db).get_heatmap(days=days)
+
+
+@logs_router.get("/correlation")
+def get_correlation(days: int = Query(1, ge=1, le=30), db: Session = Depends(get_db)):
+    """Paires de valeurs capteurs pour graphiques de corrélation."""
+    return AlertService(db).get_correlation(days=days)
+
+
+@logs_router.get("/open-duration")
+def get_open_duration(days: int = Query(7, ge=1, le=30), db: Session = Depends(get_db)):
+    """Durée moyenne des alertes non résolues par niveau."""
+    return AlertService(db).get_open_duration(days=days)
+
+
 @logs_router.get("")
 def list_logs(
-    sensor: str | None = Query(None),
+    sensor:    str | None = Query(None),
+    date_from: str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to:   str | None = Query(None, description="ISO date YYYY-MM-DD"),
     limit:  int = Query(100, ge=1, le=500),
     offset: int = Query(0,   ge=0),
     db: Session = Depends(get_db),
 ):
     """Historique des lectures capteurs."""
-    logs = AlertService(db).get_logs(sensor=sensor, limit=limit, offset=offset)
-    return {"logs": [l.to_dict() for l in logs], "count": len(logs)}
+    from datetime import datetime, timezone, timedelta
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+    svc  = AlertService(db)
+    logs = svc.get_logs(sensor=sensor, date_from=df, date_to=dt, limit=limit, offset=offset)
+    total = svc.count_logs(sensor=sensor, date_from=df, date_to=dt)
+    return {"logs": [l.to_dict() for l in logs], "count": len(logs), "total": total}
 
 
 # ── /api/sensors ──────────────────────────────────────────────────────────
@@ -222,3 +277,28 @@ def reset_thresholds():
     from ..alerts.threshold_config import reset_all
     reset_all()
     return {"message": "Seuils réinitialisés aux valeurs par défaut"}
+
+
+@config_router.get("/thresholds/history")
+def get_threshold_history(limit: int = Query(30, ge=1, le=100)):
+    """Retourne l'historique des modifications de seuils."""
+    from ..alerts.threshold_config import get_history
+    return {"history": get_history(limit=limit)}
+
+
+@config_router.get("/webhook")
+def get_webhook():
+    """Retourne la configuration webhook actuelle."""
+    from ..alerts.notifier import get_config
+    return get_config()
+
+
+@config_router.post("/webhook")
+def set_webhook(
+    url:    str  = Query("", description="URL du webhook"),
+    active: bool = Query(False),
+    format: str  = Query("generic", description="generic | slack | discord"),
+):
+    """Configure le webhook de notification (alertes CRITICAL)."""
+    from ..alerts.notifier import set_config
+    return set_config(url=url, active=active, fmt=format)

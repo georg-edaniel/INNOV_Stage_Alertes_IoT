@@ -73,6 +73,9 @@ class AlertService:
         sensor: str | None = None,
         level: str | None = None,
         resolved: bool | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Alert]:
@@ -84,7 +87,38 @@ class AlertService:
             q = q.filter(Alert.level == level.upper())
         if resolved is not None:
             q = q.filter(Alert.resolved == resolved)
+        if date_from:
+            q = q.filter(Alert.created_at >= date_from)
+        if date_to:
+            q = q.filter(Alert.created_at <= date_to)
+        if search:
+            q = q.filter(Alert.reason.ilike(f"%{search}%"))
         return q.order_by(desc(Alert.created_at)).offset(offset).limit(limit).all()
+
+    def count_all(
+        self,
+        sensor: str | None = None,
+        level: str | None = None,
+        resolved: bool | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Compte les alertes avec les mêmes filtres que get_all."""
+        q = self.db.query(Alert)
+        if sensor:
+            q = q.filter(Alert.sensor == sensor)
+        if level:
+            q = q.filter(Alert.level == level.upper())
+        if resolved is not None:
+            q = q.filter(Alert.resolved == resolved)
+        if date_from:
+            q = q.filter(Alert.created_at >= date_from)
+        if date_to:
+            q = q.filter(Alert.created_at <= date_to)
+        if search:
+            q = q.filter(Alert.reason.ilike(f"%{search}%"))
+        return q.count()
 
     def get_by_id(self, alert_id: int) -> Alert | None:
         return self.db.query(Alert).filter(Alert.id == alert_id).first()
@@ -100,6 +134,8 @@ class AlertService:
     def get_logs(
         self,
         sensor: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[SensorLog]:
@@ -107,7 +143,26 @@ class AlertService:
         q = self.db.query(SensorLog)
         if sensor:
             q = q.filter(SensorLog.sensor == sensor)
+        if date_from:
+            q = q.filter(SensorLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(SensorLog.created_at <= date_to)
         return q.order_by(desc(SensorLog.created_at)).offset(offset).limit(limit).all()
+
+    def count_logs(
+        self,
+        sensor: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> int:
+        q = self.db.query(SensorLog)
+        if sensor:
+            q = q.filter(SensorLog.sensor == sensor)
+        if date_from:
+            q = q.filter(SensorLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(SensorLog.created_at <= date_to)
+        return q.count()
 
     def get_stats(self) -> dict:
         """Statistiques globales des alertes."""
@@ -144,6 +199,26 @@ class AlertService:
         if alert and not alert.resolved:
             alert.resolved     = True
             alert.resolved_at  = datetime.now(timezone.utc)
+            self.db.commit()
+            self.db.refresh(alert)
+        return alert
+
+    def add_note(self, alert_id: int, note: str) -> Alert | None:
+        """Ajoute ou remplace la note opérateur d'une alerte."""
+        alert = self.get_by_id(alert_id)
+        if alert:
+            alert.notes = note.strip()
+            self.db.commit()
+            self.db.refresh(alert)
+        return alert
+
+    def set_tags(self, alert_id: int, tags: list[str]) -> Alert | None:
+        """Définit les tags d'une alerte (liste de chaînes)."""
+        alert = self.get_by_id(alert_id)
+        if alert:
+            # Nettoie, déduplique, trie
+            clean = sorted({t.strip().lower() for t in tags if t.strip()})
+            alert.tags = ",".join(clean)
             self.db.commit()
             self.db.refresh(alert)
         return alert
@@ -188,6 +263,12 @@ class AlertService:
         self.db.add(alert)
         self.db.commit()
         self.db.refresh(alert)
+        # Notification webhook si CRITICAL
+        try:
+            from .notifier import notify
+            notify(alert.to_dict())
+        except Exception:
+            pass
         return alert
 
     def _log_reading(self, result: DetectionResult, reading: SensorReading | None):
@@ -285,6 +366,83 @@ class AlertService:
             "by_sensor":      by_sensor,
             "stats":          self.get_stats(),
         }
+
+    def get_heatmap(self, days: int = 7) -> dict:
+        """
+        Retourne le nombre d'anomalies (WARNING+CRITICAL) par heure (0-23)
+        et par jour de semaine (0=lundi … 6=dimanche) sur les N derniers jours.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        logs = self.db.query(SensorLog).filter(
+            SensorLog.created_at >= cutoff,
+            SensorLog.level.in_(["WARNING", "CRITICAL"]),
+        ).all()
+
+        # Grille 7 jours × 24 heures initialisée à 0
+        grid = [[0] * 24 for _ in range(7)]
+        for log in logs:
+            dt = log.created_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            grid[dt.weekday()][dt.hour] += 1
+
+        return {
+            "days": days,
+            "grid": grid,  # grid[weekday][hour]
+            "total": sum(sum(row) for row in grid),
+        }
+
+    def get_correlation(self, days: int = 1) -> dict:
+        """
+        Retourne des paires de valeurs (température, turbidité, pH) horodatées
+        pour afficher des graphiques de corrélation.
+        Cherche les logs dans une fenêtre de ±30 secondes.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        logs = self.db.query(SensorLog).filter(
+            SensorLog.created_at >= cutoff
+        ).order_by(SensorLog.created_at).all()
+
+        # Grouper par bucket de 5 secondes
+        buckets: dict[int, dict] = {}
+        for log in logs:
+            dt = log.created_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            bucket = int(dt.timestamp() // 5)
+            if bucket not in buckets:
+                buckets[bucket] = {}
+            buckets[bucket][log.sensor] = log.value
+
+        # Garder seulement les buckets avec les 3 capteurs
+        pairs = []
+        for b in sorted(buckets):
+            d = buckets[b]
+            if "temperature" in d and "turbidity" in d and "ph" in d:
+                pairs.append({
+                    "temperature": round(d["temperature"], 2),
+                    "turbidity":   round(d["turbidity"], 2),
+                    "ph":          round(d["ph"], 2),
+                })
+
+        return {"days": days, "points": pairs, "count": len(pairs)}
+
+    def get_open_duration(self, days: int = 7) -> dict:
+        """Durée moyenne (en secondes) des alertes non résolues par niveau."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        now    = datetime.now(timezone.utc)
+        open_alerts = self.db.query(Alert).filter(
+            Alert.created_at >= cutoff,
+            Alert.resolved   == False,  # noqa
+        ).all()
+
+        result = {"CRITICAL": None, "WARNING": None}
+        for level in ("CRITICAL", "WARNING"):
+            subset = [a for a in open_alerts if a.level == level]
+            if subset:
+                durations = [(now - a.created_at).total_seconds() for a in subset]
+                result[level] = round(sum(durations) / len(durations), 1)
+        return result
 
     def _auto_resolve(self, sensor: str):
         """Résout automatiquement les alertes ouvertes quand le capteur revient à la normale."""

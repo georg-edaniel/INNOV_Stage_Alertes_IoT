@@ -5,14 +5,29 @@
 {% block content %}
 <h1 class="page-title">📋 Historique des lectures</h1>
 
-<!-- Filtre capteur -->
-<div class="toolbar">
-  {% for s in ['', 'temperature', 'turbidity', 'ph'] %}
-  <a href="/logs{% if s %}?sensor={{ s }}{% endif %}"
-     class="btn {% if sensor == s or (s=='' and not sensor) %}btn-primary{% else %}btn-outline{% endif %}">
-    {% if s == '' %}Tous{% elif s == 'temperature' %}🌡 Température{% elif s == 'turbidity' %}💧 Turbidité{% else %}⚗ pH{% endif %}
-  </a>
-  {% endfor %}
+<!-- Filtre capteur + dates -->
+<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:.8rem;margin-bottom:1rem;">
+  <div class="toolbar" style="margin-bottom:0;">
+    {% for s in ['', 'temperature', 'turbidity', 'ph'] %}
+    <a href="/logs{% if s %}?sensor={{ s }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}"
+       class="btn {% if sensor == s or (s=='' and not sensor) %}btn-primary{% else %}btn-outline{% endif %}">
+      {% if s == '' %}Tous{% elif s == 'temperature' %}🌡 Température{% elif s == 'turbidity' %}💧 Turbidité{% else %}⚗ pH{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <form method="get" action="/logs" style="display:flex;gap:.5rem;align-items:flex-end;">
+    {% if sensor %}<input type="hidden" name="sensor" value="{{ sensor }}">{% endif %}
+    <div>
+      <label style="display:block;font-size:.75rem;margin-bottom:.2rem;color:var(--muted);">Date début</label>
+      <input type="date" name="date_from" value="{{ date_from or '' }}" style="padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem;">
+    </div>
+    <div>
+      <label style="display:block;font-size:.75rem;margin-bottom:.2rem;color:var(--muted);">Date fin</label>
+      <input type="date" name="date_to" value="{{ date_to or '' }}" style="padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem;">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Filtrer</button>
+    <a href="/logs{% if sensor %}?sensor={{ sensor }}{% endif %}" class="btn btn-outline btn-sm">Reset</a>
+  </form>
 </div>
 
 <!-- Graphique horodatages réels -->

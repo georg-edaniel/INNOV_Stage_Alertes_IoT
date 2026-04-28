@@ -34,6 +34,8 @@ class Alert(Base):
     z_score      = Column(Float, nullable=True)
     acknowledged = Column(Boolean, default=False, nullable=False)
     resolved     = Column(Boolean, default=False, nullable=False)
+    notes        = Column(Text, nullable=True)          # commentaires opérateur
+    tags         = Column(String(200), nullable=True)   # labels CSV (matériel,réseau,…)
     created_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     resolved_at  = Column(DateTime(timezone=True), nullable=True)
 
@@ -49,6 +51,8 @@ class Alert(Base):
             "z_score":      self.z_score,
             "acknowledged": self.acknowledged,
             "resolved":     self.resolved,
+            "notes":        self.notes or "",
+            "tags":         self.tags or "",
             "created_at":   self.created_at.isoformat() if self.created_at else None,
             "resolved_at":  self.resolved_at.isoformat() if self.resolved_at else None,
         }

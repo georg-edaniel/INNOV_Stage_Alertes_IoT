@@ -44,14 +44,18 @@ def index(request: Request, db: Session = Depends(get_db)):
 
 @dashboard_router.get("/alerts", response_class=HTMLResponse)
 def alerts_page(
-    request:  Request,
-    sensor:   str | None = None,
-    level:    str | None = None,
-    resolved: str | None = None,
-    page:     int = 1,
+    request:   Request,
+    sensor:    str | None = None,
+    level:     str | None = None,
+    resolved:  str | None = None,
+    date_from: str | None = None,
+    date_to:   str | None = None,
+    q:         str | None = None,
+    page:      int = 1,
     db: Session = Depends(get_db),
 ):
     """Page historique des alertes avec filtres et pagination."""
+    from datetime import datetime, timezone, timedelta
     sensor_f   = sensor or None
     level_f    = level  or None
     resolved_f: bool | None = None
@@ -60,27 +64,35 @@ def alerts_page(
     elif resolved == "false":
         resolved_f = False
 
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+
     page   = max(1, page)
     offset = (page - 1) * PER_PAGE
 
     svc    = AlertService(db)
-    alerts = svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f,
-                         limit=PER_PAGE, offset=offset)
-    # Compte total pour la pagination
-    total  = len(svc.get_all(sensor=sensor_f, level=level_f, resolved=resolved_f, limit=5000))
+    alerts = svc.get_all(
+        sensor=sensor_f, level=level_f, resolved=resolved_f,
+        date_from=df, date_to=dt, search=q,
+        limit=PER_PAGE, offset=offset,
+    )
+    total = svc.count_all(sensor=sensor_f, level=level_f, resolved=resolved_f, date_from=df, date_to=dt, search=q)
     stats  = svc.get_stats()
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
 
     return templates.TemplateResponse(request, "alerts.html", {
-        "alerts":       [a.to_dict() for a in alerts],
-        "stats":        stats,
-        "filters":      {"sensor": sensor_f, "level": level_f, "resolved": resolved_f},
-        "page":         page,
-        "total_pages":  total_pages,
-        "total":        total,
-        "per_page":     PER_PAGE,
-        "has_prev":     page > 1,
-        "has_next":     page < total_pages,
+        "alerts":      [a.to_dict() for a in alerts],
+        "stats":       stats,
+        "filters":     {
+            "sensor": sensor_f, "level": level_f, "resolved": resolved_f,
+            "date_from": date_from, "date_to": date_to, "q": q,
+        },
+        "page":        page,
+        "total_pages": total_pages,
+        "total":       total,
+        "per_page":    PER_PAGE,
+        "has_prev":    page > 1,
+        "has_next":    page < total_pages,
     })
 
 
@@ -100,27 +112,35 @@ def alert_detail(alert_id: int, request: Request, db: Session = Depends(get_db))
 
 @dashboard_router.get("/logs", response_class=HTMLResponse)
 def logs_page(
-    request: Request,
-    sensor: str | None = None,
-    page:   int = 1,
+    request:   Request,
+    sensor:    str | None = None,
+    date_from: str | None = None,
+    date_to:   str | None = None,
+    page:      int = 1,
     db: Session = Depends(get_db),
 ):
     """Page historique des lectures capteurs + graphiques (15 par page)."""
+    from datetime import datetime, timezone, timedelta
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+
     page   = max(1, page)
     offset = (page - 1) * LOGS_PER_PAGE
 
     svc   = AlertService(db)
-    logs  = svc.get_logs(sensor=sensor or None, limit=LOGS_PER_PAGE, offset=offset)
-    total = len(svc.get_logs(sensor=sensor or None, limit=10000))
+    logs  = svc.get_logs(sensor=sensor or None, date_from=df, date_to=dt, limit=LOGS_PER_PAGE, offset=offset)
+    total = svc.count_logs(sensor=sensor or None, date_from=df, date_to=dt)
     total_pages = max(1, (total + LOGS_PER_PAGE - 1) // LOGS_PER_PAGE)
 
     # Données graphique : 60 dernières lectures pour le chart (indépendant de la page)
-    chart_logs = svc.get_logs(sensor=sensor or None, limit=60)
+    chart_logs = svc.get_logs(sensor=sensor or None, date_from=df, date_to=dt, limit=60)
 
     return templates.TemplateResponse(request, "logs.html", {
         "logs":        [l.to_dict() for l in logs],
         "chart_logs":  [l.to_dict() for l in chart_logs],
         "sensor":      sensor,
+        "date_from":   date_from,
+        "date_to":     date_to,
         "page":        page,
         "total_pages": total_pages,
         "total":       total,

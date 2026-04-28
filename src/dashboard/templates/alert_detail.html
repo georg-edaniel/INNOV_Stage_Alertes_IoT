@@ -97,6 +97,43 @@
   </div>
 </div>
 
+<!-- Tags opérateur -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3>🏷 Tags</h3></div>
+  <div class="card-body" style="padding:1rem 1.4rem;">
+    <div id="tag-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem;">
+      {% set current_tags = alert.tags.split(',') if alert.tags else [] %}
+      {% for tag in ['matériel','réseau','maintenance','logiciel','autre'] %}
+        <span class="tag-chip {% if tag in current_tags %}tag-active{% endif %}"
+              onclick="toggleTag('{{ tag }}')"
+              data-tag="{{ tag }}"
+              style="cursor:pointer;padding:.25rem .7rem;border-radius:20px;font-size:.8rem;border:1px solid var(--border);user-select:none;
+                     {% if tag in current_tags %}background:var(--primary,#1a5c9c);color:#fff;{% else %}background:var(--bg);color:var(--text);{% endif %}">
+          {{ tag }}
+        </span>
+      {% endfor %}
+    </div>
+    <div style="display:flex;align-items:center;gap:.8rem;">
+      <button class="btn btn-primary btn-sm" onclick="saveTags()">💾 Enregistrer les tags</button>
+      <span id="tag-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Commentaires opérateur -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3>💬 Note opérateur</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <textarea id="note-input" rows="4"
+      placeholder="Ajouter une note, description de la cause, action effectuée..."
+      style="width:100%;padding:.6rem .8rem;border:1px solid var(--border);border-radius:6px;font-size:.9rem;background:var(--bg);color:var(--text);resize:vertical;font-family:inherit;">{{ alert.notes }}</textarea>
+    <div style="display:flex;align-items:center;gap:.8rem;margin-top:.7rem;">
+      <button class="btn btn-primary btn-sm" onclick="saveNote()">💾 Enregistrer la note</button>
+      <span id="note-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
 <!-- Graphique des lectures du capteur -->
 <div class="card">
   <div class="card-header"><h3>📈 Lectures récentes — {{ alert.sensor }}</h3></div>
@@ -119,6 +156,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <script>
 const logs      = {{ logs | tojson }};
 const alertSensor = "{{ alert.sensor }}";
@@ -173,6 +211,54 @@ new Chart(document.getElementById('chartSensor'), {
     }
   }
 });
+
+// ── Tags ──────────────────────────────────────────────────────
+let _activeTags = new Set({{ (alert.tags or '').split(',') | tojson }}.filter(t => t));
+
+function toggleTag(tag) {
+  if (_activeTags.has(tag)) {
+    _activeTags.delete(tag);
+  } else {
+    _activeTags.add(tag);
+  }
+  document.querySelectorAll('.tag-chip').forEach(el => {
+    const t = el.dataset.tag;
+    const active = _activeTags.has(t);
+    el.style.background = active ? 'var(--primary,#1a5c9c)' : 'var(--bg)';
+    el.style.color       = active ? '#fff' : 'var(--text)';
+    el.style.borderColor = active ? 'var(--primary,#1a5c9c)' : 'var(--border)';
+  });
+}
+
+async function saveTags() {
+  const st = document.getElementById('tag-status');
+  st.textContent = 'Sauvegarde...';
+  const tagsStr = Array.from(_activeTags).join(',');
+  const r = await fetch(`/api/alerts/{{ alert.id }}/tags?tags=${encodeURIComponent(tagsStr)}`, { method: 'PATCH' });
+  if (r.ok) {
+    st.textContent = '✓ Tags enregistrés';
+    st.style.color = 'var(--success)';
+  } else {
+    st.textContent = '✗ Erreur';
+    st.style.color = 'var(--critical)';
+  }
+  setTimeout(() => st.textContent = '', 3000);
+}
+
+async function saveNote() {
+  const note = document.getElementById('note-input').value;
+  const st   = document.getElementById('note-status');
+  st.textContent = 'Sauvegarde...';
+  const r = await fetch(`/api/alerts/{{ alert.id }}/notes?note=${encodeURIComponent(note)}`, { method: 'PATCH' });
+  if (r.ok) {
+    st.textContent = '✓ Note enregistrée';
+    st.style.color = 'var(--success)';
+  } else {
+    st.textContent = '✗ Erreur';
+    st.style.color = 'var(--critical)';
+  }
+  setTimeout(() => st.textContent = '', 3000);
+}
 
 async function ack() {
   await fetch(`/api/alerts/{{ alert.id }}/acknowledge`, { method: 'PATCH' });
