@@ -91,21 +91,40 @@
   </div>
   <div class="card-body">
     {% if recent_alerts %}
-    <table>
+    <table style="table-layout:fixed;width:100%;">
+      <colgroup>
+        <col style="width:48px;">
+        <col style="width:110px;">
+        <col style="width:90px;">
+        <col style="width:90px;">
+        <col style="width:75px;">
+        <col><!-- Raison — prend le reste -->
+        <col style="width:130px;">
+        <col style="width:150px;">
+      </colgroup>
       <thead>
-        <tr><th>#</th><th>Capteur</th><th>Valeur</th><th>Niveau</th><th>Méthode</th><th>Raison</th><th>Date</th><th>Actions</th></tr>
+        <tr>
+          <th style="text-align:center;">#</th>
+          <th>Capteur</th>
+          <th>Valeur</th>
+          <th>Niveau</th>
+          <th>Méthode</th>
+          <th>Raison</th>
+          <th>Date</th>
+          <th style="text-align:center;">Actions</th>
+        </tr>
       </thead>
       <tbody id="alerts-tbody">
         {% for a in recent_alerts %}
         <tr>
-          <td><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
-          <td><b>{{ a.sensor }}</b></td>
-          <td>{{ a.value }} {{ a.unit }}</td>
+          <td style="text-align:center;"><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>{{ a.sensor }}</b></td>
+          <td style="white-space:nowrap;">{{ a.value }} {{ a.unit }}</td>
           <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
-          <td>{{ a.method }}</td>
-          <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
-          <td style="white-space:nowrap;font-size:.78rem;color:#999;">{{ a.created_at[:19] | replace('T',' ') }}</td>
-          <td style="white-space:nowrap;">
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ a.method }}</td>
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
+          <td style="white-space:nowrap;font-size:.78rem;color:var(--muted);">{{ a.created_at[:19] | replace('T',' ') }}</td>
+          <td style="white-space:nowrap;text-align:center;">
             {% if not a.acknowledged %}
             <button class="btn btn-sm btn-outline" onclick="ackAlert({{ a.id }}, this)">Acquitter</button>
             {% endif %}
@@ -263,14 +282,14 @@ function addAlertRow(a) {
   if (!tbody) return;
   const tr = document.createElement('tr');
   tr.innerHTML = `
-    <td><a href="/alerts/${a.id}">${a.id}</a></td>
-    <td><b>${a.sensor}</b></td>
-    <td>${a.value} ${a.unit}</td>
+    <td style="text-align:center;"><a href="/alerts/${a.id}">${a.id}</a></td>
+    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>${a.sensor}</b></td>
+    <td style="white-space:nowrap;">${a.value} ${a.unit}</td>
     <td><span class="badge badge-${a.level.toLowerCase()}">${a.level}</span></td>
-    <td>${a.method}</td>
-    <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.reason}">${a.reason}</td>
-    <td style="white-space:nowrap;font-size:.78rem;color:#999">${a.created_at.slice(0,19).replace('T',' ')}</td>
-    <td><button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button></td>
+    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.method}</td>
+    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.reason}">${a.reason}</td>
+    <td style="white-space:nowrap;font-size:.78rem;color:var(--muted);">${a.created_at.slice(0,19).replace('T',' ')}</td>
+    <td style="white-space:nowrap;text-align:center;"><button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button></td>
   `;
   tbody.prepend(tr);
 }
