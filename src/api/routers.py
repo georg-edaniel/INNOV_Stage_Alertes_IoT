@@ -137,6 +137,29 @@ def update_tags(alert_id: int, tags: str = Query("", description="Tags séparés
     return {"message": "Tags enregistrés", "alert": alert.to_dict()}
 
 
+@alerts_router.delete("/{alert_id}")
+def delete_alert(alert_id: int, db: Session = Depends(get_db)):
+    """Supprime définitivement une alerte."""
+    deleted = AlertService(db).delete(alert_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": "Alerte supprimée"}
+
+
+@alerts_router.delete("")
+def delete_alerts_bulk(
+    ids: str = Query(..., description="IDs séparés par virgules, ex: 1,2,3"),
+    db: Session = Depends(get_db),
+):
+    """Supprime plusieurs alertes en une seule requête."""
+    try:
+        id_list = [int(i.strip()) for i in ids.split(",") if i.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="IDs invalides")
+    count = AlertService(db).delete_bulk(id_list)
+    return {"message": f"{count} alerte(s) supprimée(s)", "count": count}
+
+
 @alerts_router.patch("/acknowledge-all")
 def acknowledge_all(db: Session = Depends(get_db)):
     count = AlertService(db).acknowledge_all()

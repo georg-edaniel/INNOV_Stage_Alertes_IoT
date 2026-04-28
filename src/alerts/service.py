@@ -223,6 +223,21 @@ class AlertService:
             self.db.refresh(alert)
         return alert
 
+    def delete(self, alert_id: int) -> bool:
+        """Supprime une alerte. Retourne True si supprimée."""
+        alert = self.get_by_id(alert_id)
+        if alert:
+            self.db.delete(alert)
+            self.db.commit()
+            return True
+        return False
+
+    def delete_bulk(self, ids: list[int]) -> int:
+        """Supprime plusieurs alertes. Retourne le nombre supprimé."""
+        count = self.db.query(Alert).filter(Alert.id.in_(ids)).delete(synchronize_session=False)
+        self.db.commit()
+        return count
+
     def acknowledge_all(self) -> int:
         """Acquitte toutes les alertes ouvertes. Retourne le nombre mis à jour."""
         count = self.db.query(Alert).filter(

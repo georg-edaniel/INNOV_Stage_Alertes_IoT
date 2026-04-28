@@ -143,14 +143,15 @@
 </div>
 
 <!-- Actions -->
-{% if not alert.resolved %}
-<div style="display:flex;gap:.8rem;margin-top:1.5rem;">
-  {% if not alert.acknowledged %}
-  <button class="btn btn-outline" onclick="ack()">👁 Acquitter</button>
+<div style="display:flex;gap:.8rem;margin-top:1.5rem;flex-wrap:wrap;">
+  {% if not alert.resolved %}
+    {% if not alert.acknowledged %}
+    <button class="btn btn-outline" onclick="ack()">👁 Acquitter</button>
+    {% endif %}
+    <button class="btn btn-success" onclick="resolve()">✅ Résoudre</button>
   {% endif %}
-  <button class="btn btn-success" onclick="resolve()">✅ Résoudre</button>
+  <button class="btn btn-danger" onclick="deleteAlert()" style="margin-left:auto;">🗑 Supprimer</button>
 </div>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -267,6 +268,15 @@ async function ack() {
 async function resolve() {
   await fetch(`/api/alerts/{{ alert.id }}/resolve`, { method: 'PATCH' });
   location.reload();
+}
+async function deleteAlert() {
+  if (!confirm('Supprimer définitivement cette alerte ? Cette action est irréversible.')) return;
+  const r = await fetch(`/api/alerts/{{ alert.id }}`, { method: 'DELETE' });
+  if (r.ok) {
+    window.location.href = '/alerts';
+  } else {
+    alert('Erreur lors de la suppression.');
+  }
 }
 </script>
 {% endblock %}
