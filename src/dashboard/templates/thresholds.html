@@ -88,6 +88,52 @@
     </div>
   </div>
 </div>
+<!-- Email SMTP -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>📧 Notifications Email SMTP</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Envoie un email lors de chaque alerte CRITICAL. Fonctionne avec Gmail (App Password), Outlook, ou tout serveur SMTP.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Serveur SMTP</label>
+        <input type="text" id="em-host" placeholder="smtp.gmail.com"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Port</label>
+        <input type="number" id="em-port" value="587"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur (email expéditeur)</label>
+        <input type="text" id="em-user" placeholder="alerts@example.com"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe (App Password)</label>
+        <input type="password" id="em-pass" placeholder="••••••••"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Adresse expéditeur (optionnel)</label>
+        <input type="text" id="em-from" placeholder="IoT Alert System &lt;alerts@example.com&gt;"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Destinataire</label>
+        <input type="email" id="em-to" placeholder="admin@example.com"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" id="em-active"> Activer les notifications email
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="saveEmail()">💾 Enregistrer</button>
+      <span id="em-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -200,5 +246,41 @@ async function saveWebhook() {
   html += '</tbody></table>';
   con.innerHTML = html;
 })();
+
+// ── Email SMTP ─────────────────────────────────────────────────
+(async () => {
+  const cfg = await fetch('/api/config/email').then(r => r.json()).catch(() => ({}));
+  document.getElementById('em-host').value   = cfg.smtp_host || 'smtp.gmail.com';
+  document.getElementById('em-port').value   = cfg.smtp_port || 587;
+  document.getElementById('em-user').value   = cfg.username  || '';
+  document.getElementById('em-from').value   = cfg.from_addr || '';
+  document.getElementById('em-to').value     = cfg.to_addr   || '';
+  document.getElementById('em-active').checked = cfg.active  || false;
+})();
+
+async function saveEmail() {
+  const st = document.getElementById('em-status');
+  st.textContent = 'Sauvegarde...';
+  const pass = document.getElementById('em-pass').value;
+  const params = new URLSearchParams({
+    smtp_host: document.getElementById('em-host').value,
+    smtp_port: document.getElementById('em-port').value,
+    username:  document.getElementById('em-user').value,
+    from_addr: document.getElementById('em-from').value,
+    to_addr:   document.getElementById('em-to').value,
+    active:    document.getElementById('em-active').checked,
+  });
+  if (pass) params.set('password', pass);
+  const r = await fetch('/api/config/email?' + params.toString(), { method: 'POST' });
+  if (r.ok) {
+    st.textContent = '✓ Configuration email enregistrée';
+    st.style.color = 'var(--success)';
+    document.getElementById('em-pass').value = '';
+  } else {
+    st.textContent = '✗ Erreur';
+    st.style.color = 'var(--critical)';
+  }
+  setTimeout(() => st.textContent = '', 4000);
+}
 </script>
 {% endblock %}

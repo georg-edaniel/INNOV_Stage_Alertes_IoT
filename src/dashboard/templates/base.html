@@ -16,12 +16,23 @@
     </div>
     <div style="font-size:.72rem;color:rgba(255,255,255,.5);letter-spacing:.06em;text-transform:uppercase;margin-bottom:1.6rem;padding-left:.4rem;">IoT Alert System</div>
 
+    <!-- Recherche globale -->
+    <div style="position:relative;margin-bottom:1rem;">
+      <input id="global-search" type="text" placeholder="🔍 Rechercher..." autocomplete="off"
+        style="width:100%;padding:.45rem .7rem;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:.82rem;outline:none;"
+        oninput="globalSearch(this.value)" onfocus="showResults()" onblur="setTimeout(hideResults,200)">
+      <div id="search-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2d3d;border:1px solid rgba(255,255,255,.15);border-radius:6px;max-height:280px;overflow-y:auto;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.4);"></div>
+    </div>
+
     <div class="nav-section">Navigation</div>
-    <a href="/"         class="nav-item {% if active=='dashboard'   %}active{% endif %}">📊 Dashboard</a>
-    <a href="/alerts"   class="nav-item {% if active=='alerts'      %}active{% endif %}">🔔 Alertes</a>
-    <a href="/logs"     class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
-    <a href="/report"   class="nav-item {% if active=='report'      %}active{% endif %}">📄 Rapport</a>
-    <a href="/config"   class="nav-item {% if active=='config'      %}active{% endif %}">⚙️ Seuils</a>
+    <a href="/"            class="nav-item {% if active=='dashboard'   %}active{% endif %}">📊 Dashboard</a>
+    <a href="/alerts"      class="nav-item {% if active=='alerts'      %}active{% endif %}">🔔 Alertes</a>
+    <a href="/logs"        class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
+    <a href="/report"      class="nav-item {% if active=='report'      %}active{% endif %}">📄 Rapport</a>
+    <a href="/config"      class="nav-item {% if active=='config'      %}active{% endif %}">⚙️ Seuils</a>
+    <a href="/audit"       class="nav-item {% if active=='audit'       %}active{% endif %}">🛡 Audit</a>
+    <a href="/archived"    class="nav-item {% if active=='archived'    %}active{% endif %}">📦 Archives</a>
+    <a href="/presentation" class="nav-item" target="_blank">🖥 Présentation</a>
 
     <div class="nav-section">API</div>
     <a href="/docs" class="nav-item" target="_blank">📖 Swagger UI</a>
@@ -163,7 +174,119 @@ function updateTimerDisplay() {
 
 initLastAlertTimer();
 setInterval(updateTimerDisplay, 1000);
+
+// ── Recherche globale ───────────────────────────────────────────
+let _searchTimer = null;
+const _levelColors = { CRITICAL: '#e74c3c', WARNING: '#f39c12', NORMAL: '#27ae60' };
+
+async function globalSearch(q) {
+  clearTimeout(_searchTimer);
+  const box = document.getElementById('search-results');
+  if (!q || q.length < 2) { box.innerHTML = ''; box.style.display = 'none'; return; }
+  _searchTimer = setTimeout(async () => {
+    try {
+      const r    = await fetch(`/api/alerts?q=${encodeURIComponent(q)}&limit=8`);
+      const data = await r.json();
+      if (!data.alerts.length) {
+        box.innerHTML = '<div style="padding:.6rem 1rem;color:rgba(255,255,255,.4);font-size:.82rem;">Aucun résultat</div>';
+      } else {
+        box.innerHTML = data.alerts.map(a => `
+          <a href="/alerts/${a.id}" style="display:block;padding:.55rem 1rem;text-decoration:none;color:#e6edf3;border-bottom:1px solid rgba(255,255,255,.06);font-size:.82rem;transition:background .15s;"
+             onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background=''">
+            <span style="color:${_levelColors[a.level]};font-weight:600;margin-right:.5rem;">[${a.level}]</span>
+            <b>${a.sensor}</b> — ${a.reason.slice(0,55)}${a.reason.length>55?'…':''}
+            <span style="float:right;color:rgba(255,255,255,.3);font-size:.75rem;">#${a.id}</span>
+          </a>`).join('') +
+          `<a href="/alerts?q=${encodeURIComponent(q)}" style="display:block;padding:.5rem 1rem;text-align:center;font-size:.78rem;color:#58a6ff;border-top:1px solid rgba(255,255,255,.08);">Voir tous les résultats →</a>`;
+      }
+      box.style.display = 'block';
+    } catch (_) {}
+  }, 280);
+}
+
+function showResults() {
+  const box = document.getElementById('search-results');
+  if (box.innerHTML) box.style.display = 'block';
+}
+function hideResults() {
+  document.getElementById('search-results').style.display = 'none';
+}
+
+// ── Raccourcis clavier ──────────────────────────────────────────
+let _keyBuffer = '';
+let _keyTimer  = null;
+
+const _shortcuts = {
+  'g+d': '/',
+  'g+a': '/alerts',
+  'g+l': '/logs',
+  'g+r': '/report',
+  'g+c': '/config',
+  'g+u': '/audit',
+  'g+p': '/presentation',
+};
+
+document.addEventListener('keydown', (e) => {
+  // Ignorer si focus sur input/textarea
+  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+
+  // ? => afficher aide
+  if (e.key === '?' && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    showShortcutsModal();
+    return;
+  }
+  // Echap => fermer modals
+  if (e.key === 'Escape') {
+    hideShortcutsModal();
+    return;
+  }
+  // R => rafraîchir
+  if (e.key === 'r' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    location.reload();
+    return;
+  }
+  // Séquences g+x
+  const k = e.key.toLowerCase();
+  _keyBuffer += k;
+  clearTimeout(_keyTimer);
+  _keyTimer = setTimeout(() => { _keyBuffer = ''; }, 800);
+  if (_shortcuts[_keyBuffer]) {
+    window.location.href = _shortcuts[_keyBuffer];
+    _keyBuffer = '';
+  } else if (_keyBuffer.length > 2) {
+    _keyBuffer = k;
+  }
+});
+
+function showShortcutsModal() {
+  document.getElementById('shortcuts-modal').style.display = 'flex';
+}
+function hideShortcutsModal() {
+  document.getElementById('shortcuts-modal').style.display = 'none';
+}
 </script>
+
+<!-- Modal raccourcis -->
+<div id="shortcuts-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)hideShortcutsModal()">
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:12px;padding:1.5rem 2rem;min-width:320px;max-width:480px;box-shadow:0 16px 48px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 1rem;font-size:1rem;">⌨️ Raccourcis clavier</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+      <tr><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G D</kbd></td><td>Dashboard</td></tr>
+      <tr style="background:var(--bg-alt,rgba(0,0,0,.03));"><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G A</kbd></td><td>Alertes</td></tr>
+      <tr><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G L</kbd></td><td>Historique (Logs)</td></tr>
+      <tr style="background:var(--bg-alt,rgba(0,0,0,.03));"><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G R</kbd></td><td>Rapport</td></tr>
+      <tr><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G C</kbd></td><td>Configuration</td></tr>
+      <tr style="background:var(--bg-alt,rgba(0,0,0,.03));"><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">G U</kbd></td><td>Audit</td></tr>
+      <tr><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">R</kbd></td><td>Rafraîchir la page</td></tr>
+      <tr style="background:var(--bg-alt,rgba(0,0,0,.03));"><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">Esc</kbd></td><td>Fermer ce modal</td></tr>
+      <tr><td style="padding:.3rem .6rem;"><kbd style="background:var(--border);border-radius:4px;padding:.1rem .4rem;font-family:monospace;">?</kbd></td><td>Afficher cette aide</td></tr>
+    </table>
+    <div style="text-align:right;margin-top:1rem;">
+      <button onclick="hideShortcutsModal()" class="btn btn-outline btn-sm">Fermer</button>
+    </div>
+  </div>
+</div>
 {% block scripts %}{% endblock %}
 </body>
 </html>

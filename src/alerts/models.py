@@ -5,7 +5,7 @@ Modèles SQLAlchemy pour les alertes et l'historique des lectures.
 """
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey
 from .database import Base
 
 
@@ -59,6 +59,66 @@ class Alert(Base):
 
     def __repr__(self):
         return f"<Alert #{self.id} {self.sensor} [{self.level}] {self.created_at}>"
+
+
+class AuditLog(Base):
+    """Journal d'audit des actions opérateur sur les alertes."""
+    __tablename__ = "audit_logs"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    action     = Column(String(50), nullable=False, index=True)   # acknowledge|resolve|delete|note|tag|archive
+    alert_id   = Column(Integer, nullable=True, index=True)       # peut être None si alerte supprimée
+    details    = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id":         self.id,
+            "action":     self.action,
+            "alert_id":   self.alert_id,
+            "details":    self.details or "",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ArchivedAlert(Base):
+    """Alertes résolues archivées (copie depuis alerts après N jours)."""
+    __tablename__ = "archived_alerts"
+
+    id           = Column(Integer, primary_key=True)
+    original_id  = Column(Integer, nullable=False, index=True)
+    sensor       = Column(String(50), nullable=False)
+    value        = Column(Float, nullable=False)
+    unit         = Column(String(20), nullable=False)
+    level        = Column(String(20), nullable=False)
+    method       = Column(String(20), nullable=False)
+    reason       = Column(Text, nullable=False)
+    z_score      = Column(Float, nullable=True)
+    acknowledged = Column(Boolean, default=False)
+    notes        = Column(Text, nullable=True)
+    tags         = Column(String(200), nullable=True)
+    created_at   = Column(DateTime(timezone=True), nullable=False)
+    resolved_at  = Column(DateTime(timezone=True), nullable=True)
+    archived_at  = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id":           self.id,
+            "original_id":  self.original_id,
+            "sensor":       self.sensor,
+            "value":        self.value,
+            "unit":         self.unit,
+            "level":        self.level,
+            "method":       self.method,
+            "reason":       self.reason,
+            "z_score":      self.z_score,
+            "acknowledged": self.acknowledged,
+            "notes":        self.notes or "",
+            "tags":         self.tags or "",
+            "created_at":   self.created_at.isoformat() if self.created_at else None,
+            "resolved_at":  self.resolved_at.isoformat() if self.resolved_at else None,
+            "archived_at":  self.archived_at.isoformat() if self.archived_at else None,
+        }
 
 
 class SensorLog(Base):

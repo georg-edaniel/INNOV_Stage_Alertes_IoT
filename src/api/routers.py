@@ -166,6 +166,32 @@ def acknowledge_all(db: Session = Depends(get_db)):
     return {"message": f"{count} alerte(s) acquittée(s)"}
 
 
+@alerts_router.get("/export-json")
+def export_alerts_json(
+    sensor:   str | None  = Query(None),
+    level:    str | None  = Query(None),
+    resolved: bool | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Exporte les alertes filtrées en JSON téléchargeable."""
+    import json as _json
+    svc    = AlertService(db)
+    alerts = svc.get_all(sensor=sensor, level=level, resolved=resolved, limit=5000)
+    payload = _json.dumps([a.to_dict() for a in alerts], indent=2, ensure_ascii=False)
+    return StreamingResponse(
+        iter([payload]),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=alertes.json"},
+    )
+
+
+@alerts_router.post("/archive")
+def archive_alerts(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)):
+    """Archive les alertes résolues de plus de N jours."""
+    count = AlertService(db).archive_old_alerts(days=days)
+    return {"message": f"{count} alerte(s) archivée(s)", "count": count}
+
+
 # ── /api/logs ─────────────────────────────────────────────────────────────
 
 @logs_router.get("/stats")
@@ -196,6 +222,42 @@ def get_correlation(days: int = Query(1, ge=1, le=30), db: Session = Depends(get
 def get_open_duration(days: int = Query(7, ge=1, le=30), db: Session = Depends(get_db)):
     """Durée moyenne des alertes non résolues par niveau."""
     return AlertService(db).get_open_duration(days=days)
+
+
+@logs_router.get("/trend")
+def get_trend(
+    days:   int = Query(30, ge=1, le=90),
+    sensor: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Agrégation journalière des lectures par capteur sur N jours."""
+    return AlertService(db).get_trend(days=days, sensor=sensor)
+
+
+@logs_router.get("/compare")
+def get_comparison(
+    period: str = Query("week", description="week | month"),
+    db: Session = Depends(get_db),
+):
+    """Statistiques période courante vs période précédente."""
+    if period not in ("week", "month"):
+        from fastapi import HTTPException
+        raise HTTPException(400, "period doit être 'week' ou 'month'")
+    return AlertService(db).get_comparison(period=period)
+
+
+@logs_router.get("/audit")
+def get_audit(
+    alert_id: int | None = Query(None),
+    limit:  int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Journal d'audit des actions opérateur."""
+    svc   = AlertService(db)
+    logs  = svc.get_audit_log(alert_id=alert_id, limit=limit, offset=offset)
+    total = svc.count_audit_log(alert_id=alert_id)
+    return {"logs": [l.to_dict() for l in logs], "total": total}
 
 
 @logs_router.get("")
@@ -359,3 +421,29 @@ def set_webhook(
     """Configure le webhook de notification (alertes CRITICAL)."""
     from ..alerts.notifier import set_config
     return set_config(url=url, active=active, fmt=format)
+
+
+@config_router.get("/email")
+def get_email_config():
+    """Retourne la configuration email SMTP (sans mot de passe)."""
+    from ..alerts.email_notifier import get_config
+    return get_config()
+
+
+@config_router.post("/email")
+def set_email_config(
+    smtp_host: str  = Query("smtp.gmail.com"),
+    smtp_port: int  = Query(587),
+    username:  str  = Query(""),
+    password:  str  = Query(""),
+    from_addr: str  = Query(""),
+    to_addr:   str  = Query(""),
+    active:    bool = Query(False),
+):
+    """Configure la notification email SMTP."""
+    from ..alerts.email_notifier import set_config
+    return set_config(
+        smtp_host=smtp_host, smtp_port=smtp_port,
+        username=username, password=password if password != "***" else None,
+        from_addr=from_addr, to_addr=to_addr, active=active,
+    )

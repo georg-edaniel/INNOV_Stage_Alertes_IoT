@@ -148,6 +148,44 @@
     <div style="position:relative;height:260px;"><canvas id="chartCorr"></canvas></div>
   </div>
 </div>
+
+<!-- Tendance long terme -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header">
+    <h3>📈 Tendance long terme</h3>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+      <select id="trend-sensor" onchange="loadTrend()" style="padding:.2rem .4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem;">
+        <option value="">Tous les capteurs</option>
+        <option value="temperature">🌡 Température</option>
+        <option value="turbidity">💧 Turbidité</option>
+        <option value="ph">⚗ pH</option>
+      </select>
+      <select id="trend-days" onchange="loadTrend()" style="padding:.2rem .4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:.85rem;">
+        <option value="7">7 jours</option>
+        <option value="30" selected>30 jours</option>
+        <option value="90">90 jours</option>
+      </select>
+    </div>
+  </div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div style="position:relative;height:280px;"><canvas id="chartTrend"></canvas></div>
+  </div>
+</div>
+
+<!-- Comparaison de périodes -->
+<div class="card" style="margin-top:1.5rem;margin-bottom:1.5rem;">
+  <div class="card-header">
+    <h3>⚖️ Comparaison de périodes</h3>
+    <div style="display:flex;gap:.5rem;">
+      <button class="btn btn-outline btn-sm" onclick="loadComparison('week')" id="cmp-week">Cette semaine vs précédente</button>
+      <button class="btn btn-outline btn-sm" onclick="loadComparison('month')" id="cmp-month">Ce mois vs précédent</button>
+    </div>
+  </div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div id="comparison-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.2rem;"></div>
+    <div style="position:relative;height:260px;"><canvas id="chartComparison"></canvas></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -276,6 +314,102 @@ function updateCorr() {
     }
   });
 }
+
+// ── Tendance long terme ───────────────────────────────────────
+let _trendChart = null;
+const _trendColors = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+
+async function loadTrend() {
+  const s = document.getElementById('trend-sensor').value;
+  const d = document.getElementById('trend-days').value;
+  const url = `/api/logs/trend?days=${d}` + (s ? `&sensor=${s}` : '');
+  const r = await fetch(url);
+  const data = await r.json();
+
+  if (_trendChart) _trendChart.destroy();
+  const sensorList = s ? [s] : ['temperature', 'turbidity', 'ph'];
+  const allDates = [...new Set(
+    sensorList.flatMap(sen => (data.sensors[sen] || []).map(p => p.date))
+  )].sort();
+
+  const datasets = sensorList.map(sen => ({
+    label: sen,
+    data: allDates.map(date => {
+      const pt = (data.sensors[sen] || []).find(p => p.date === date);
+      return pt ? pt.avg : null;
+    }),
+    borderColor: _trendColors[sen],
+    backgroundColor: _trendColors[sen] + '22',
+    tension: 0.3,
+    fill: false,
+    pointRadius: 2,
+    spanGaps: true,
+  }));
+
+  _trendChart = new Chart(document.getElementById('chartTrend'), {
+    type: 'line',
+    data: { labels: allDates, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+}
+loadTrend();
+
+// ── Comparaison de périodes ───────────────────────────────────
+let _cmpChart = null;
+
+async function loadComparison(period) {
+  document.getElementById('cmp-week').classList.toggle('btn-primary', period === 'week');
+  document.getElementById('cmp-week').classList.toggle('btn-outline', period !== 'week');
+  document.getElementById('cmp-month').classList.toggle('btn-primary', period === 'month');
+  document.getElementById('cmp-month').classList.toggle('btn-outline', period !== 'month');
+
+  const r    = await fetch(`/api/logs/compare?period=${period}`);
+  const data = await r.json();
+  const c    = data.current;
+  const p    = data.previous;
+  const d    = data.delta;
+  const periodLabel = period === 'week' ? 'semaine' : 'mois';
+
+  function deltaHtml(val) {
+    if (val === null) return '';
+    const up = val > 0;
+    return `<span style="font-size:.75rem;color:${up?'#e74c3c':'#27ae60'};margin-left:.3rem;">${up?'▲':'▼'}${Math.abs(val)}%</span>`;
+  }
+
+  document.getElementById('comparison-kpis').innerHTML = [
+    { label: 'Total alertes',  cur: c.total,       prev: p.total,       delta: d.total       },
+    { label: 'Critiques',      cur: c.critical,     prev: p.critical,    delta: d.critical,   color: '#e74c3c' },
+    { label: 'Avertissements', cur: c.warning,      prev: p.warning,     delta: d.warning,    color: '#f39c12' },
+    { label: 'Taux anomalie',  cur: c.anomaly_rate+'%', prev: p.anomaly_rate+'%', delta: d.anomaly_rate },
+  ].map(k => `
+    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:.8rem 1rem;">
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:.3rem;">${k.label}</div>
+      <div style="font-size:1.4rem;font-weight:700;color:${k.color||'var(--text)'};">${k.cur}${deltaHtml(k.delta)}</div>
+      <div style="font-size:.75rem;color:var(--muted);">Période préc. : ${k.prev}</div>
+    </div>`).join('');
+
+  if (_cmpChart) _cmpChart.destroy();
+  _cmpChart = new Chart(document.getElementById('chartComparison'), {
+    type: 'bar',
+    data: {
+      labels: ['Total', 'Critiques', 'Avertissements'],
+      datasets: [
+        { label: `Cette ${periodLabel}`,  data: [c.total, c.critical, c.warning], backgroundColor: '#1a5c9c' },
+        { label: `${periodLabel} préc.`,  data: [p.total, p.critical, p.warning], backgroundColor: '#1a5c9c55' },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+loadComparison('week');
 
 // ── Export PDF du rapport ─────────────────────────────────────
 async function exportReportPdf() {

@@ -71,6 +71,9 @@
       <button class="btn btn-outline btn-sm" onclick="exportExcel()">⬇ Export Excel</button>
       <a href="/api/alerts/export{% if filters.sensor or filters.level or filters.resolved is not none %}?{% if filters.sensor %}sensor={{ filters.sensor }}&{% endif %}{% if filters.level %}level={{ filters.level }}&{% endif %}{% if filters.resolved is not none %}resolved={{ filters.resolved | lower }}{% endif %}{% endif %}"
          class="btn btn-outline btn-sm" download>⬇ Export CSV</a>
+      <a href="/api/alerts/export-json{% if filters.sensor or filters.level or filters.resolved is not none %}?{% if filters.sensor %}sensor={{ filters.sensor }}&{% endif %}{% if filters.level %}level={{ filters.level }}&{% endif %}{% if filters.resolved is not none %}resolved={{ filters.resolved | lower }}{% endif %}{% endif %}"
+         class="btn btn-outline btn-sm" download>⬇ Export JSON</a>
+      <button class="btn btn-outline btn-sm" onclick="archiveAlerts()" title="Archiver les alertes résolues de plus de 30 jours">📦 Archiver</button>
     </div>
   </div>
   <div class="card-body">
@@ -625,6 +628,14 @@ function updateSelection() {
   const all = document.querySelectorAll('.row-chk');
   document.getElementById('chk-all').indeterminate = checked.length > 0 && checked.length < all.length;
   document.getElementById('chk-all').checked = checked.length === all.length && all.length > 0;
+}
+
+async function archiveAlerts() {
+  if (!confirm('Archiver les alertes résolues de plus de 30 jours ? Elles seront déplacées dans /archived.')) return;
+  const r    = await fetch('/api/alerts/archive?days=30', { method: 'POST' });
+  const data = await r.json();
+  alert(data.message);
+  if (data.count > 0) location.reload();
 }
 
 async function deleteSelected() {

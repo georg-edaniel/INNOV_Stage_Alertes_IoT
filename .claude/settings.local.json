@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uvicorn src.api.main:app:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd:*)",
+      "Bash(kill:*)"
+    ]
+  }
+}

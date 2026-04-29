@@ -14,7 +14,7 @@ from sqlalchemy import desc, and_
 
 from ..detection.levels import AlertLevel, DetectionResult
 from ..simulator.generator import SensorReading
-from .models import Alert, SensorLog
+from .models import Alert, SensorLog, AuditLog, ArchivedAlert
 
 # Délai minimum entre deux alertes identiques (même capteur + même niveau)
 DEDUP_WINDOW_SECONDS = 60
@@ -191,6 +191,7 @@ class AlertService:
             alert.acknowledged = True
             self.db.commit()
             self.db.refresh(alert)
+            self._audit("acknowledge", alert_id, f"Alerte #{alert_id} acquittée")
         return alert
 
     def resolve(self, alert_id: int) -> Alert | None:
@@ -201,6 +202,7 @@ class AlertService:
             alert.resolved_at  = datetime.now(timezone.utc)
             self.db.commit()
             self.db.refresh(alert)
+            self._audit("resolve", alert_id, f"Alerte #{alert_id} résolue")
         return alert
 
     def add_note(self, alert_id: int, note: str) -> Alert | None:
@@ -210,23 +212,25 @@ class AlertService:
             alert.notes = note.strip()
             self.db.commit()
             self.db.refresh(alert)
+            self._audit("note", alert_id, f"Note mise à jour sur #{alert_id}")
         return alert
 
     def set_tags(self, alert_id: int, tags: list[str]) -> Alert | None:
         """Définit les tags d'une alerte (liste de chaînes)."""
         alert = self.get_by_id(alert_id)
         if alert:
-            # Nettoie, déduplique, trie
             clean = sorted({t.strip().lower() for t in tags if t.strip()})
             alert.tags = ",".join(clean)
             self.db.commit()
             self.db.refresh(alert)
+            self._audit("tag", alert_id, f"Tags: {alert.tags}")
         return alert
 
     def delete(self, alert_id: int) -> bool:
         """Supprime une alerte. Retourne True si supprimée."""
         alert = self.get_by_id(alert_id)
         if alert:
+            self._audit("delete", alert_id, f"Alerte #{alert_id} supprimée ({alert.sensor} {alert.level})")
             self.db.delete(alert)
             self.db.commit()
             return True
@@ -234,6 +238,8 @@ class AlertService:
 
     def delete_bulk(self, ids: list[int]) -> int:
         """Supprime plusieurs alertes. Retourne le nombre supprimé."""
+        for aid in ids:
+            self._audit("delete", aid, f"Suppression groupée #{aid}")
         count = self.db.query(Alert).filter(Alert.id.in_(ids)).delete(synchronize_session=False)
         self.db.commit()
         return count
@@ -245,7 +251,76 @@ class AlertService:
             Alert.resolved     == False,  # noqa
         ).update({"acknowledged": True})
         self.db.commit()
+        self._audit("acknowledge_all", None, f"{count} alertes acquittées")
         return count
+
+    # ------------------------------------------------------------------
+    # Audit
+    # ------------------------------------------------------------------
+
+    def _audit(self, action: str, alert_id: int | None, details: str = ""):
+        """Enregistre une action dans le journal d'audit."""
+        try:
+            entry = AuditLog(action=action, alert_id=alert_id, details=details)
+            self.db.add(entry)
+            self.db.commit()
+        except Exception:
+            pass
+
+    def get_audit_log(self, alert_id: int | None = None, limit: int = 50, offset: int = 0) -> list[AuditLog]:
+        """Retourne le journal d'audit, filtré par alerte si demandé."""
+        q = self.db.query(AuditLog)
+        if alert_id is not None:
+            q = q.filter(AuditLog.alert_id == alert_id)
+        return q.order_by(desc(AuditLog.created_at)).offset(offset).limit(limit).all()
+
+    def count_audit_log(self, alert_id: int | None = None) -> int:
+        q = self.db.query(AuditLog)
+        if alert_id is not None:
+            q = q.filter(AuditLog.alert_id == alert_id)
+        return q.count()
+
+    # ------------------------------------------------------------------
+    # Archivage
+    # ------------------------------------------------------------------
+
+    def archive_old_alerts(self, days: int = 30) -> int:
+        """Déplace les alertes résolues de plus de N jours vers archived_alerts. Retourne le nombre archivé."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        old = self.db.query(Alert).filter(
+            Alert.resolved   == True,     # noqa
+            Alert.created_at <= cutoff,
+        ).all()
+        count = 0
+        for a in old:
+            archived = ArchivedAlert(
+                original_id  = a.id,
+                sensor       = a.sensor,
+                value        = a.value,
+                unit         = a.unit,
+                level        = a.level,
+                method       = a.method,
+                reason       = a.reason,
+                z_score      = a.z_score,
+                acknowledged = a.acknowledged,
+                notes        = a.notes,
+                tags         = a.tags,
+                created_at   = a.created_at,
+                resolved_at  = a.resolved_at,
+            )
+            self.db.add(archived)
+            self.db.delete(a)
+            count += 1
+        if count:
+            self._audit("archive", None, f"{count} alertes archivées (>{days} jours)")
+            self.db.commit()
+        return count
+
+    def get_archived(self, limit: int = 50, offset: int = 0) -> list[ArchivedAlert]:
+        return self.db.query(ArchivedAlert).order_by(desc(ArchivedAlert.archived_at)).offset(offset).limit(limit).all()
+
+    def count_archived(self) -> int:
+        return self.db.query(ArchivedAlert).count()
 
     # ------------------------------------------------------------------
     # Interne
@@ -278,10 +353,15 @@ class AlertService:
         self.db.add(alert)
         self.db.commit()
         self.db.refresh(alert)
-        # Notification webhook si CRITICAL
+        # Notifications (webhook + email) si CRITICAL
         try:
-            from .notifier import notify
-            notify(alert.to_dict())
+            from .notifier import notify as webhook_notify
+            webhook_notify(alert.to_dict())
+        except Exception:
+            pass
+        try:
+            from .email_notifier import notify as email_notify
+            email_notify(alert.to_dict())
         except Exception:
             pass
         return alert
@@ -458,6 +538,76 @@ class AlertService:
                 durations = [(now - a.created_at).total_seconds() for a in subset]
                 result[level] = round(sum(durations) / len(durations), 1)
         return result
+
+    def get_trend(self, days: int = 30, sensor: str | None = None) -> dict:
+        """Agrégation journalière des lectures par capteur sur N jours."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        q = self.db.query(SensorLog).filter(SensorLog.created_at >= cutoff)
+        if sensor:
+            q = q.filter(SensorLog.sensor == sensor)
+        logs = q.order_by(SensorLog.created_at).all()
+
+        # Agrégation par (sensor, date)
+        from collections import defaultdict
+        buckets: dict[tuple, list] = defaultdict(list)
+        for log in logs:
+            dt = log.created_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            day = dt.strftime("%Y-%m-%d")
+            buckets[(log.sensor, day)].append(log.value)
+
+        sensors = [sensor] if sensor else ["temperature", "turbidity", "ph"]
+        result = {}
+        for s in sensors:
+            days_data = []
+            for (sen, day), vals in sorted(buckets.items()):
+                if sen == s:
+                    days_data.append({"date": day, "avg": round(sum(vals)/len(vals), 2), "count": len(vals)})
+            result[s] = days_data
+
+        return {"days": days, "sensors": result}
+
+    def get_comparison(self, period: str = "week") -> dict:
+        """Comparaison de la période courante vs la période précédente."""
+        now = datetime.now(timezone.utc)
+        if period == "month":
+            n = 30
+        else:
+            n = 7
+
+        current_start  = now - timedelta(days=n)
+        previous_start = now - timedelta(days=n * 2)
+        previous_end   = current_start
+
+        def _stats(df, dt):
+            alerts = self.db.query(Alert).filter(Alert.created_at >= df, Alert.created_at < dt).all()
+            logs   = self.db.query(SensorLog).filter(SensorLog.created_at >= df, SensorLog.created_at < dt).all()
+            total  = len(alerts)
+            critical = sum(1 for a in alerts if a.level == "CRITICAL")
+            warning  = sum(1 for a in alerts if a.level == "WARNING")
+            anomaly_rate = round(total / max(len(logs), 1) * 100, 1)
+            return {"total": total, "critical": critical, "warning": warning, "anomaly_rate": anomaly_rate, "readings": len(logs)}
+
+        current  = _stats(current_start,  now)
+        previous = _stats(previous_start, previous_end)
+
+        def _delta(c, p):
+            if p == 0:
+                return None
+            return round((c - p) / p * 100, 1)
+
+        return {
+            "period": period,
+            "current":  current,
+            "previous": previous,
+            "delta": {
+                "total":       _delta(current["total"],       previous["total"]),
+                "critical":    _delta(current["critical"],    previous["critical"]),
+                "warning":     _delta(current["warning"],     previous["warning"]),
+                "anomaly_rate":_delta(current["anomaly_rate"],previous["anomaly_rate"]),
+            }
+        }
 
     def _auto_resolve(self, sensor: str):
         """Résout automatiquement les alertes ouvertes quand le capteur revient à la normale."""

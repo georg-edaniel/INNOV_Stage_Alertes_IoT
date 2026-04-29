@@ -172,3 +172,57 @@ def config_page(request: Request):
     return templates.TemplateResponse(request, "thresholds.html", {
         "thresholds": get_all(),
     })
+
+
+@dashboard_router.get("/audit", response_class=HTMLResponse)
+def audit_page(request: Request, page: int = 1, db: Session = Depends(get_db)):
+    """Page journal d'audit des actions opérateur."""
+    PER = 30
+    svc    = AlertService(db)
+    page   = max(1, page)
+    offset = (page - 1) * PER
+    logs   = svc.get_audit_log(limit=PER, offset=offset)
+    total  = svc.count_audit_log()
+    total_pages = max(1, (total + PER - 1) // PER)
+    return templates.TemplateResponse(request, "audit.html", {
+        "logs":        [l.to_dict() for l in logs],
+        "page":        page,
+        "total_pages": total_pages,
+        "total":       total,
+        "has_prev":    page > 1,
+        "has_next":    page < total_pages,
+    })
+
+
+@dashboard_router.get("/archived", response_class=HTMLResponse)
+def archived_page(request: Request, page: int = 1, db: Session = Depends(get_db)):
+    """Page des alertes archivées."""
+    PER = 20
+    svc    = AlertService(db)
+    page   = max(1, page)
+    offset = (page - 1) * PER
+    alerts = svc.get_archived(limit=PER, offset=offset)
+    total  = svc.count_archived()
+    total_pages = max(1, (total + PER - 1) // PER)
+    return templates.TemplateResponse(request, "archived.html", {
+        "alerts":      [a.to_dict() for a in alerts],
+        "page":        page,
+        "total_pages": total_pages,
+        "total":       total,
+        "has_prev":    page > 1,
+        "has_next":    page < total_pages,
+    })
+
+
+@dashboard_router.get("/presentation", response_class=HTMLResponse)
+def presentation_page(request: Request, db: Session = Depends(get_db)):
+    """Mode présentation — affichage mural sans navigation."""
+    svc   = AlertService(db)
+    stats = svc.get_stats()
+    open_c = svc.get_open_count()
+    health = svc.get_sensor_health()
+    return templates.TemplateResponse(request, "presentation.html", {
+        "stats":  stats,
+        "open":   open_c,
+        "health": health,
+    })

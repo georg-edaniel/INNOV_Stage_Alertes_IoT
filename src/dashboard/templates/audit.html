@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set active = "audit" %}
+{% block title %}Journal d'audit{% endblock %}
+
+{% block content %}
+<h1 class="page-title">
+  📋 Journal d'audit
+  <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} entrée(s)</span>
+</h1>
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    {% if logs %}
+    <table style="table-layout:fixed;width:100%;">
+      <colgroup>
+        <col style="width:55px;">
+        <col style="width:110px;">
+        <col style="width:80px;">
+        <col>
+        <col style="width:160px;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th style="text-align:center;">#</th>
+          <th>Action</th>
+          <th>Alerte</th>
+          <th>Détails</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td style="text-align:center;color:var(--muted);font-size:.8rem;">{{ log.id }}</td>
+          <td>
+            {% set icons = {'acknowledge':'👁','resolve':'✅','delete':'🗑','note':'💬','tag':'🏷','archive':'📦','acknowledge_all':'👁'} %}
+            <span class="badge badge-{% if log.action in ['resolve','acknowledge'] %}normal{% elif log.action == 'delete' %}critical{% else %}warning{% endif %}">
+              {{ icons.get(log.action,'⚙') }} {{ log.action }}
+            </span>
+          </td>
+          <td style="text-align:center;">
+            {% if log.alert_id %}
+            <a href="/alerts/{{ log.alert_id }}">#{{ log.alert_id }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ log.details }}">{{ log.details }}</td>
+          <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ log.created_at[:19] | replace('T',' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty" style="padding:2rem;">Aucune action enregistrée</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if has_prev %}<a href="?page={{ page - 1 }}" class="btn btn-outline btn-sm">← Précédent</a>{% endif %}
+  <span style="font-size:.85rem;color:var(--muted);">Page {{ page }} / {{ total_pages }}</span>
+  {% if has_next %}<a href="?page={{ page + 1 }}" class="btn btn-outline btn-sm">Suivant →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

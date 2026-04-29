@@ -51,6 +51,28 @@
   {% endfor %}
 </div>
 
+<!-- Jauges capteurs -->
+<div class="chart-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
+  <div class="chart-card">
+    <div class="chart-title">🌡 Température</div>
+    <div style="position:relative;height:140px;"><canvas id="gaugeTemp"></canvas></div>
+    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-temperature">—</div>
+    <div style="text-align:center;font-size:.75rem;color:var(--muted);">°C · normale : 15–25</div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">💧 Turbidité</div>
+    <div style="position:relative;height:140px;"><canvas id="gaugeTurb"></canvas></div>
+    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-turbidity">—</div>
+    <div style="text-align:center;font-size:.75rem;color:var(--muted);">NTU · normale : 0–10</div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">⚗ pH</div>
+    <div style="position:relative;height:140px;"><canvas id="gaugePh"></canvas></div>
+    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-ph">—</div>
+    <div style="text-align:center;font-size:.75rem;color:var(--muted);">pH · normale : 6.5–8.5</div>
+  </div>
+</div>
+
 <!-- Graphiques -->
 <div class="chart-grid">
   <div class="chart-card">
@@ -160,6 +182,74 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
+// ── Jauges capteurs ────────────────────────────────────────────
+const _gaugeConfig = {
+  temperature: { min: 0,  max: 50,  warn: [25, 35], crit: [35, 50], normalMin: 15, normalMax: 25, unit: '°C', id: 'gaugeTemp',  valId: 'gauge-val-temperature' },
+  turbidity:   { min: 0,  max: 100, warn: [10, 25], crit: [25,100], normalMin: 0,  normalMax: 10, unit: 'NTU', id: 'gaugeTurb', valId: 'gauge-val-turbidity'   },
+  ph:          { min: 0,  max: 14,  warn: [8.5,10], crit: [10, 14], normalMin: 6.5,normalMax: 8.5,unit: '',    id: 'gaugePh',   valId: 'gauge-val-ph'          },
+};
+const _gaugeInstances = {};
+
+function _makeGauge(cfg, value) {
+  const pct   = Math.min(1, Math.max(0, (value - cfg.min) / (cfg.max - cfg.min)));
+  const color = value >= cfg.crit[0] ? '#e74c3c' : value >= cfg.warn[0] ? '#f39c12' : '#27ae60';
+  const normPct  = (cfg.normalMax - cfg.min) / (cfg.max - cfg.min);
+  const warnPct  = (cfg.warn[0]   - cfg.min) / (cfg.max - cfg.min);
+  const critPct  = (cfg.crit[0]   - cfg.min) / (cfg.max - cfg.min);
+
+  return {
+    type: 'doughnut',
+    data: {
+      datasets: [
+        // Fond de la jauge (zones colorées)
+        {
+          data: [normPct, warnPct - normPct, critPct - warnPct, 1 - critPct],
+          backgroundColor: ['#27ae6044','#f39c1244','#e74c3c44','#00000022'],
+          borderWidth: 0, cutout: '70%',
+        },
+        // Aiguille / valeur
+        {
+          data: [pct, 1 - pct],
+          backgroundColor: [color, 'transparent'],
+          borderWidth: 0, cutout: '75%',
+        }
+      ]
+    },
+    options: {
+      rotation: -90, circumference: 180,
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      animation: { duration: 400 },
+    }
+  };
+}
+
+function initGauges() {
+  fetch('/api/sensors/health').then(r => r.json()).then(h => {
+    for (const [sensor, cfg] of Object.entries(_gaugeConfig)) {
+      const info  = h[sensor];
+      const val   = info && info.value !== null ? info.value : cfg.min;
+      const chart = new Chart(document.getElementById(cfg.id), _makeGauge(cfg, val));
+      _gaugeInstances[sensor] = { chart, cfg };
+      document.getElementById(cfg.valId).textContent = info && info.value !== null
+        ? `${info.value} ${cfg.unit}` : '—';
+    }
+  }).catch(() => {});
+}
+initGauges();
+
+function updateGauge(sensor, value) {
+  const inst = _gaugeInstances[sensor];
+  if (!inst) return;
+  const { chart, cfg } = inst;
+  const pct   = Math.min(1, Math.max(0, (value - cfg.min) / (cfg.max - cfg.min)));
+  const color = value >= cfg.crit[0] ? '#e74c3c' : value >= cfg.warn[0] ? '#f39c12' : '#27ae60';
+  chart.data.datasets[1].data             = [pct, 1 - pct];
+  chart.data.datasets[1].backgroundColor  = [color, 'transparent'];
+  chart.update('active');
+  document.getElementById(cfg.valId).textContent = `${Math.round(value * 100) / 100} ${cfg.unit}`;
+}
+
 // ── Graphique Donut ────────────────────────────────────────────
 new Chart(document.getElementById('chartPie'), {
   type: 'doughnut',
@@ -326,6 +416,11 @@ es.onmessage = (e) => {
   }
 
   updateBarChart(data.readings);
+
+  // Mise à jour jauges
+  if (data.readings) {
+    data.readings.forEach(r => { if (_gaugeInstances[r.sensor]) updateGauge(r.sensor, r.value); });
+  }
 };
 
 es.onerror = () => {

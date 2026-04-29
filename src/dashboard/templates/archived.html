@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set active = "archived" %}
+{% block title %}Alertes archivées{% endblock %}
+
+{% block content %}
+<h1 class="page-title">
+  📦 Alertes archivées
+  <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} archivée(s)</span>
+</h1>
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    {% if alerts %}
+    <table style="table-layout:fixed;width:100%;">
+      <colgroup>
+        <col style="width:55px;">
+        <col style="width:55px;">
+        <col style="width:110px;">
+        <col style="width:90px;">
+        <col style="width:90px;">
+        <col>
+        <col style="width:140px;">
+        <col style="width:140px;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th style="text-align:center;">ID</th>
+          <th style="text-align:center;">Orig.</th>
+          <th>Capteur</th>
+          <th>Valeur</th>
+          <th>Niveau</th>
+          <th>Raison</th>
+          <th>Créée</th>
+          <th>Archivée</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in alerts %}
+        <tr>
+          <td style="text-align:center;color:var(--muted);font-size:.8rem;">{{ a.id }}</td>
+          <td style="text-align:center;color:var(--muted);font-size:.8rem;">#{{ a.original_id }}</td>
+          <td><b>{{ a.sensor }}</b></td>
+          <td style="white-space:nowrap;">{{ a.value }} {{ a.unit }}</td>
+          <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
+          <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ a.created_at[:19] | replace('T',' ') }}</td>
+          <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ a.archived_at[:19] | replace('T',' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty" style="padding:2rem;">📦 Aucune alerte archivée</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if has_prev %}<a href="?page={{ page - 1 }}" class="btn btn-outline btn-sm">← Précédent</a>{% endif %}
+  <span style="font-size:.85rem;color:var(--muted);">Page {{ page }} / {{ total_pages }}</span>
+  {% if has_next %}<a href="?page={{ page + 1 }}" class="btn btn-outline btn-sm">Suivant →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
