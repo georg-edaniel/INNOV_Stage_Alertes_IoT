@@ -231,10 +231,10 @@
 {% endblock %}
 
 {% block scripts %}
-<!-- jsPDF + AutoTable + SheetJS (CDN) -->
+<!-- jsPDF + AutoTable + ExcelJS (CDN) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 // ── Actions tableau ────────────────────────────────────────────
 async function ack(id) {
@@ -480,26 +480,133 @@ async function generatePdf() {
   }
 }
 
-// ── Export Excel ───────────────────────────────────────────────
-function exportExcel() {
+// ── Export Excel (ExcelJS — mise en forme complète) ────────────
+async function exportExcel() {
   const rows = getTableRows();
   if (!rows.length) { alert('Aucune donnée à exporter.'); return; }
 
-  const wsData = [
-    ['#', 'Capteur', 'Valeur', 'Niveau', 'Méthode', 'Z-score', 'Statut', 'Raison', 'Créée le', 'Résolue le'],
-    ...rows.map(r => [r.id, r.sensor, r.value, r.level, r.method, r.zscore, r.status, r.reason, r.created, r.resolved])
-  ];
+  const wb = new ExcelJS.Workbook();
+  wb.creator  = 'INNOV IoT Alert System';
+  wb.created  = new Date();
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    {wch:6},{wch:14},{wch:14},{wch:10},{wch:18},
-    {wch:9},{wch:12},{wch:50},{wch:18},{wch:18}
-  ];
-  XLSX.utils.book_append_sheet(wb, ws, 'Alertes');
+  const ws = wb.addWorksheet('Alertes', {
+    views: [{ state: 'frozen', ySplit: 2 }],  // fige les 2 premières lignes
+  });
 
-  const fname = `alertes_${new Date().toISOString().slice(0,10)}.xlsx`;
-  XLSX.writeFile(wb, fname);
+  // ── Ligne titre (fusionnée) ──────────────────────────────────
+  ws.mergeCells('A1:J1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = `Rapport Alertes IoT — ${new Date().toLocaleDateString('fr-CA')}`;
+  titleCell.font      = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5C9C' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 28;
+
+  // ── En-têtes colonnes ────────────────────────────────────────
+  const HEADERS = [
+    { header: '#',         key: 'id',      width: 7  },
+    { header: 'Capteur',   key: 'sensor',  width: 14 },
+    { header: 'Valeur',    key: 'value',   width: 14 },
+    { header: 'Niveau',    key: 'level',   width: 12 },
+    { header: 'Méthode',   key: 'method',  width: 12 },
+    { header: 'Z-score',   key: 'zscore',  width: 10 },
+    { header: 'Statut',    key: 'status',  width: 13 },
+    { header: 'Raison',    key: 'reason',  width: 52 },
+    { header: 'Créée le',  key: 'created', width: 20 },
+    { header: 'Résolue le',key: 'resolved',width: 20 },
+  ];
+  ws.columns = HEADERS;
+
+  // Styliser la ligne d'en-têtes (ligne 2 car ligne 1 = titre)
+  const headerRow = ws.getRow(2);
+  headerRow.values = HEADERS.map(h => h.header);
+  headerRow.height = 20;
+  headerRow.eachCell(cell => {
+    cell.font      = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E4057' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border    = {
+      top: { style: 'thin', color: { argb: 'FF1A5C9C' } },
+      bottom: { style: 'medium', color: { argb: 'FF1A5C9C' } },
+      left: { style: 'thin', color: { argb: 'FF666666' } },
+      right: { style: 'thin', color: { argb: 'FF666666' } },
+    };
+  });
+
+  // ── Couleurs par niveau et statut ────────────────────────────
+  const LEVEL_COLORS = {
+    'CRITICAL': { font: 'FFBF2600', fill: 'FFFFD6CC' },
+    'WARNING':  { font: 'FF7D4E00', fill: 'FFFFF2CC' },
+  };
+  const STATUS_COLORS = {
+    'Résolue':   { font: 'FF1E7E34', fill: 'FFD4EDDA' },
+    'Acquittée': { font: 'FF004085', fill: 'FFCCE5FF' },
+    'Ouverte':   { font: 'FF721C24', fill: 'FFF8D7DA' },
+  };
+
+  // ── Lignes de données ────────────────────────────────────────
+  rows.forEach((r, i) => {
+    const rowData = [r.id, r.sensor, r.value, r.level, r.method,
+                     r.zscore || '—', r.status, r.reason, r.created, r.resolved || '—'];
+    const dataRow = ws.addRow(rowData);
+    dataRow.height = 18;
+
+    // Alternance fond blanc / bleu très clair
+    const rowFill = i % 2 === 0
+      ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }
+      : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FA' } };
+
+    dataRow.eachCell((cell, colIdx) => {
+      cell.font      = { name: 'Calibri', size: 10 };
+      cell.alignment = { vertical: 'middle', wrapText: colIdx === 8 };
+      cell.fill      = rowFill;
+      cell.border    = {
+        top:    { style: 'hair', color: { argb: 'FFDDDDDD' } },
+        bottom: { style: 'hair', color: { argb: 'FFDDDDDD' } },
+        left:   { style: 'hair', color: { argb: 'FFDDDDDD' } },
+        right:  { style: 'hair', color: { argb: 'FFDDDDDD' } },
+      };
+    });
+
+    // Colorier la cellule Niveau (colonne 4)
+    const levelCell = dataRow.getCell(4);
+    const lc = LEVEL_COLORS[r.level];
+    if (lc) {
+      levelCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: lc.font } };
+      levelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lc.fill } };
+      levelCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+
+    // Colorier la cellule Statut (colonne 7)
+    const statusCell = dataRow.getCell(7);
+    const sc = STATUS_COLORS[r.status];
+    if (sc) {
+      statusCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: sc.font } };
+      statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: sc.fill } };
+      statusCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+
+    // Aligner # à droite
+    dataRow.getCell(1).alignment = { horizontal: 'right', vertical: 'middle' };
+  });
+
+  // ── Filtre automatique sur les en-têtes ──────────────────────
+  ws.autoFilter = { from: 'A2', to: 'J2' };
+
+  // ── Ligne de total en bas ────────────────────────────────────
+  const totalRow = ws.addRow(['', `${rows.length} alerte(s)`, '', '', '', '', '', '', '', '']);
+  totalRow.getCell(2).font = { bold: true, italic: true, color: { argb: 'FF1A5C9C' }, size: 10 };
+  totalRow.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F0FA' } };
+
+  // ── Téléchargement ───────────────────────────────────────────
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href       = url;
+  a.download   = `alertes_${new Date().toISOString().slice(0,10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Sélection & Suppression ───────────────────────────────────
