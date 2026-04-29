@@ -20,6 +20,7 @@ from .routers import (
 )
 from .dashboard import dashboard_router
 from .stream import stream_router, push_tick
+from .auth import auth_router, require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,25 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# ── Middleware d'authentification ──────────────────────────────
+from fastapi import Request
+from fastapi.responses import RedirectResponse
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Redirige vers /login si l'auth est activée et l'utilisateur non connecté."""
+    path = request.url.path
+    # Routes publiques (pas besoin d'authentification)
+    public = {"/login", "/static", "/health"}
+    if any(path.startswith(p) for p in public) or path == "/favicon.ico":
+        return await call_next(request)
+    # Vérifier l'authentification
+    user = require_auth(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    return await call_next(request)
+
+app.include_router(auth_router,          tags=["Auth"])
 app.include_router(dashboard_router,                              tags=["Dashboard"])
 app.include_router(stream_router,      prefix="/api",            tags=["Temps réel"])
 app.include_router(alerts_router,      prefix="/api/alerts",     tags=["Alertes"])

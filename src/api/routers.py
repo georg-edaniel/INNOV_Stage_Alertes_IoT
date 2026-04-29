@@ -430,6 +430,24 @@ def get_email_config():
     return get_config()
 
 
+@config_router.get("/auth")
+def get_auth_config_endpoint():
+    """Retourne la configuration d'authentification."""
+    from .auth import get_auth_config
+    return get_auth_config()
+
+
+@config_router.post("/auth")
+def set_auth_config_endpoint(
+    enabled:  bool = Query(False),
+    username: str  = Query("admin"),
+    password: str  = Query(""),
+):
+    """Configure l'authentification (activer/désactiver + changer le mot de passe)."""
+    from .auth import update_auth_config
+    return update_auth_config(enabled=enabled, username=username, password=password or None)
+
+
 @config_router.post("/email")
 def set_email_config(
     smtp_host: str  = Query("smtp.gmail.com"),

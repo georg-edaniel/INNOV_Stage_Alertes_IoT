@@ -88,6 +88,36 @@
     </div>
   </div>
 </div>
+<!-- Authentification -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>🔐 Authentification</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Protège l'accès au dashboard par un nom d'utilisateur et un mot de passe. Désactivé par défaut.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur</label>
+        <input type="text" id="auth-user" placeholder="admin"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nouveau mot de passe</label>
+        <input type="password" id="auth-pass" placeholder="Laisser vide pour ne pas changer"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" id="auth-enabled"> Activer la protection par mot de passe
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="saveAuth()">💾 Enregistrer</button>
+      <span id="auth-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+    <div style="margin-top:.8rem;padding:.6rem .9rem;background:var(--bg-alt,rgba(0,0,0,.03));border-radius:6px;font-size:.8rem;color:var(--muted);">
+      <b>Identifiants par défaut :</b> admin / admin — Changez-les immédiatement si vous activez l'authentification.
+    </div>
+  </div>
+</div>
+
 <!-- Email SMTP -->
 <div class="card" style="margin-top:2rem;">
   <div class="card-header"><h3>📧 Notifications Email SMTP</h3></div>
@@ -246,6 +276,34 @@ async function saveWebhook() {
   html += '</tbody></table>';
   con.innerHTML = html;
 })();
+
+// ── Authentification ───────────────────────────────────────────
+(async () => {
+  const cfg = await fetch('/api/config/auth').then(r => r.json()).catch(() => ({}));
+  document.getElementById('auth-user').value      = cfg.username || 'admin';
+  document.getElementById('auth-enabled').checked = cfg.enabled  || false;
+})();
+
+async function saveAuth() {
+  const st = document.getElementById('auth-status');
+  st.textContent = 'Sauvegarde...';
+  const params = new URLSearchParams({
+    enabled:  document.getElementById('auth-enabled').checked,
+    username: document.getElementById('auth-user').value,
+  });
+  const pass = document.getElementById('auth-pass').value;
+  if (pass) params.set('password', pass);
+  const r = await fetch('/api/config/auth?' + params.toString(), { method: 'POST' });
+  if (r.ok) {
+    st.textContent = '✓ Configuration auth enregistrée';
+    st.style.color = 'var(--success)';
+    document.getElementById('auth-pass').value = '';
+  } else {
+    st.textContent = '✗ Erreur';
+    st.style.color = 'var(--critical)';
+  }
+  setTimeout(() => st.textContent = '', 4000);
+}
 
 // ── Email SMTP ─────────────────────────────────────────────────
 (async () => {
