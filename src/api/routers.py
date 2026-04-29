@@ -258,6 +258,40 @@ def simulator_tick_sensor(sensor: str, db: Session = Depends(get_db)):
     }
 
 
+@simulator_router.get("/status")
+def simulator_status():
+    """Retourne l'état courant du simulateur (running ou non)."""
+    from .main import get_scheduler
+    s = get_scheduler()
+    return {"running": s.is_running if s else False}
+
+
+@simulator_router.post("/start")
+def simulator_start():
+    """Démarre le simulateur si arrêté."""
+    from .main import get_scheduler
+    s = get_scheduler()
+    if not s:
+        raise HTTPException(status_code=503, detail="Scheduler non initialisé")
+    if s.is_running:
+        return {"running": True, "message": "Déjà en cours"}
+    s.start()
+    return {"running": True, "message": "Simulateur démarré"}
+
+
+@simulator_router.post("/stop")
+def simulator_stop():
+    """Arrête le simulateur si en cours."""
+    from .main import get_scheduler
+    s = get_scheduler()
+    if not s:
+        raise HTTPException(status_code=503, detail="Scheduler non initialisé")
+    if not s.is_running:
+        return {"running": False, "message": "Déjà arrêté"}
+    s.stop()
+    return {"running": False, "message": "Simulateur arrêté"}
+
+
 @simulator_router.post("/config")
 def set_simulator_config(
     probability: float = Query(0.20, ge=0.0, le=1.0, description="Probabilité d'anomalie (0–1)"),

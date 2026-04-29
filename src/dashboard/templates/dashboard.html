@@ -66,12 +66,27 @@
 <!-- Contrôles simulateur -->
 <div class="sim-controls">
   <h3>🎛 Contrôle du simulateur</h3>
+
+  <!-- Marche / Arrêt -->
+  <div class="range-row">
+    <label>État</label>
+    <div style="display:flex;align-items:center;gap:.8rem;">
+      <span id="sim-state-dot" style="width:12px;height:12px;border-radius:50%;background:#ccc;display:inline-block;transition:background .3s;"></span>
+      <span id="sim-state-label" style="font-size:.88rem;font-weight:600;">Chargement…</span>
+      <button id="btn-start" class="btn btn-success btn-sm" onclick="simStart()" style="display:none;">▶ Marche</button>
+      <button id="btn-stop"  class="btn btn-danger  btn-sm" onclick="simStop()"  style="display:none;">⏹ Arrêt</button>
+    </div>
+  </div>
+
+  <!-- Probabilité d'anomalie -->
   <div class="range-row">
     <label>Probabilité d'anomalie</label>
     <input type="range" id="prob-slider" class="range-input" min="0" max="1" step="0.05" value="0.20" oninput="updateProb(this.value)">
     <span class="range-value" id="prob-val">20 %</span>
     <button class="btn btn-primary btn-sm" onclick="applyProb()">Appliquer</button>
   </div>
+
+  <!-- Injection manuelle -->
   <div class="range-row" style="margin-bottom:0;">
     <label>Injecter une anomalie</label>
     <div class="btn-group">
@@ -80,6 +95,7 @@
       <button class="btn btn-warning btn-sm" onclick="injectTick('ph')">⚗ pH</button>
     </div>
   </div>
+
   <div id="sim-msg" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;min-height:1rem;"></div>
 </div>
 
@@ -209,6 +225,45 @@ async function resolveAlert(id, btn) {
   btn.closest('tr').style.opacity = '.4';
   setTimeout(() => location.reload(), 600);
 }
+
+// ── Marche / Arrêt simulateur ──────────────────────────────────
+function _setSimUI(running) {
+  const dot   = document.getElementById('sim-state-dot');
+  const label = document.getElementById('sim-state-label');
+  const btnStart = document.getElementById('btn-start');
+  const btnStop  = document.getElementById('btn-stop');
+  dot.style.background   = running ? '#27ae60' : '#e74c3c';
+  label.textContent      = running ? 'En marche' : 'Arrêté';
+  label.style.color      = running ? 'var(--success)' : 'var(--critical)';
+  btnStart.style.display = running ? 'none' : '';
+  btnStop.style.display  = running ? '' : 'none';
+}
+
+async function loadSimStatus() {
+  const r = await fetch('/api/simulator/status');
+  const d = await r.json();
+  _setSimUI(d.running);
+}
+
+async function simStart() {
+  const msg = document.getElementById('sim-msg');
+  const r   = await fetch('/api/simulator/start', { method: 'POST' });
+  const d   = await r.json();
+  _setSimUI(d.running);
+  msg.textContent = '▶ ' + d.message;
+  setTimeout(() => msg.textContent = '', 3000);
+}
+
+async function simStop() {
+  const msg = document.getElementById('sim-msg');
+  const r   = await fetch('/api/simulator/stop', { method: 'POST' });
+  const d   = await r.json();
+  _setSimUI(d.running);
+  msg.textContent = '⏹ ' + d.message;
+  setTimeout(() => msg.textContent = '', 3000);
+}
+
+loadSimStatus();
 
 // ── Contrôles simulateur ───────────────────────────────────────
 function updateProb(v) {

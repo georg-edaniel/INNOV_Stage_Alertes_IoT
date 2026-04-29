@@ -28,6 +28,11 @@ STATIC_DIR = Path(__file__).parent.parent / "dashboard" / "static"
 _scheduler: SimulatorScheduler | None = None
 
 
+def get_scheduler() -> SimulatorScheduler | None:
+    """Retourne l'instance globale du scheduler (pour les endpoints)."""
+    return _scheduler
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _scheduler
