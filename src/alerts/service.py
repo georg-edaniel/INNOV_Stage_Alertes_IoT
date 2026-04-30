@@ -29,8 +29,9 @@ class AlertService:
     de doublon — on retourne l'alerte existante.
     """
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, db: Session, user: str = "système"):
+        self.db   = db
+        self.user = user
 
     # ------------------------------------------------------------------
     # Création
@@ -261,7 +262,7 @@ class AlertService:
     def _audit(self, action: str, alert_id: int | None, details: str = ""):
         """Enregistre une action dans le journal d'audit."""
         try:
-            entry = AuditLog(action=action, alert_id=alert_id, details=details)
+            entry = AuditLog(action=action, alert_id=alert_id, details=details, user=self.user)
             self.db.add(entry)
             self.db.commit()
         except Exception:
@@ -288,8 +289,9 @@ class AlertService:
         """Déplace les alertes résolues de plus de N jours vers archived_alerts. Retourne le nombre archivé."""
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         old = self.db.query(Alert).filter(
-            Alert.resolved   == True,     # noqa
-            Alert.created_at <= cutoff,
+            Alert.resolved    == True,       # noqa
+            Alert.resolved_at != None,       # noqa
+            Alert.resolved_at <= cutoff,
         ).all()
         count = 0
         for a in old:

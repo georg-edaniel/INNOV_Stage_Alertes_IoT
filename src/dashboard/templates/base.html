@@ -21,7 +21,7 @@
       <input id="global-search" type="text" placeholder="🔍 Rechercher..." autocomplete="off"
         style="width:100%;padding:.45rem .7rem;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:.82rem;outline:none;"
         oninput="globalSearch(this.value)" onfocus="showResults()" onblur="setTimeout(hideResults,200)">
-      <div id="search-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2d3d;border:1px solid rgba(255,255,255,.15);border-radius:6px;max-height:280px;overflow-y:auto;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.4);"></div>
+      <div id="search-results" onmousedown="event.preventDefault()" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2d3d;border:1px solid rgba(255,255,255,.15);border-radius:6px;max-height:280px;overflow-y:auto;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.4);"></div>
     </div>
 
     <div class="nav-section">Navigation</div>

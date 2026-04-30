@@ -69,6 +69,7 @@ class AuditLog(Base):
     action     = Column(String(50), nullable=False, index=True)   # acknowledge|resolve|delete|note|tag|archive
     alert_id   = Column(Integer, nullable=True, index=True)       # peut être None si alerte supprimée
     details    = Column(Text, nullable=True)
+    user       = Column(String(100), nullable=True, default="système")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     def to_dict(self) -> dict:
@@ -77,6 +78,7 @@ class AuditLog(Base):
             "action":     self.action,
             "alert_id":   self.alert_id,
             "details":    self.details or "",
+            "user":       self.user or "système",
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

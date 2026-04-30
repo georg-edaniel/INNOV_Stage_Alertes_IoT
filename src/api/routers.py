@@ -12,12 +12,13 @@ Config    : GET/POST /api/config/thresholds, POST /api/config/thresholds/reset
 
 import csv
 import io
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..alerts.database import get_db
 from ..alerts.service import AlertService
+from .auth import get_current_user
 from ..detection.engine import AnomalyDetectionEngine
 from ..simulator.generator import IoTSimulator
 
@@ -103,44 +104,44 @@ def get_alert(alert_id: int, db: Session = Depends(get_db)):
 
 
 @alerts_router.patch("/{alert_id}/acknowledge")
-def acknowledge_alert(alert_id: int, db: Session = Depends(get_db)):
-    alert = AlertService(db).acknowledge(alert_id)
+def acknowledge_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
+    alert = AlertService(db, user=get_current_user(request) or "système").acknowledge(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Alerte acquittée", "alert": alert.to_dict()}
 
 
 @alerts_router.patch("/{alert_id}/resolve")
-def resolve_alert(alert_id: int, db: Session = Depends(get_db)):
-    alert = AlertService(db).resolve(alert_id)
+def resolve_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
+    alert = AlertService(db, user=get_current_user(request) or "système").resolve(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Alerte résolue", "alert": alert.to_dict()}
 
 
 @alerts_router.patch("/{alert_id}/notes")
-def update_note(alert_id: int, note: str = "", db: Session = Depends(get_db)):
+def update_note(alert_id: int, request: Request, note: str = "", db: Session = Depends(get_db)):
     """Ajoute ou met à jour la note opérateur d'une alerte."""
-    alert = AlertService(db).add_note(alert_id, note)
+    alert = AlertService(db, user=get_current_user(request) or "système").add_note(alert_id, note)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Note enregistrée", "alert": alert.to_dict()}
 
 
 @alerts_router.patch("/{alert_id}/tags")
-def update_tags(alert_id: int, tags: str = Query("", description="Tags séparés par virgules"), db: Session = Depends(get_db)):
+def update_tags(alert_id: int, request: Request, tags: str = Query("", description="Tags séparés par virgules"), db: Session = Depends(get_db)):
     """Définit les tags d'une alerte."""
     tag_list = [t for t in tags.split(",") if t.strip()]
-    alert = AlertService(db).set_tags(alert_id, tag_list)
+    alert = AlertService(db, user=get_current_user(request) or "système").set_tags(alert_id, tag_list)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Tags enregistrés", "alert": alert.to_dict()}
 
 
 @alerts_router.delete("/{alert_id}")
-def delete_alert(alert_id: int, db: Session = Depends(get_db)):
+def delete_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
     """Supprime définitivement une alerte."""
-    deleted = AlertService(db).delete(alert_id)
+    deleted = AlertService(db, user=get_current_user(request) or "système").delete(alert_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Alerte supprimée"}
@@ -148,6 +149,7 @@ def delete_alert(alert_id: int, db: Session = Depends(get_db)):
 
 @alerts_router.delete("")
 def delete_alerts_bulk(
+    request: Request,
     ids: str = Query(..., description="IDs séparés par virgules, ex: 1,2,3"),
     db: Session = Depends(get_db),
 ):
@@ -156,13 +158,13 @@ def delete_alerts_bulk(
         id_list = [int(i.strip()) for i in ids.split(",") if i.strip()]
     except ValueError:
         raise HTTPException(status_code=400, detail="IDs invalides")
-    count = AlertService(db).delete_bulk(id_list)
+    count = AlertService(db, user=get_current_user(request) or "système").delete_bulk(id_list)
     return {"message": f"{count} alerte(s) supprimée(s)", "count": count}
 
 
 @alerts_router.patch("/acknowledge-all")
-def acknowledge_all(db: Session = Depends(get_db)):
-    count = AlertService(db).acknowledge_all()
+def acknowledge_all(request: Request, db: Session = Depends(get_db)):
+    count = AlertService(db, user=get_current_user(request) or "système").acknowledge_all()
     return {"message": f"{count} alerte(s) acquittée(s)"}
 
 
@@ -186,9 +188,9 @@ def export_alerts_json(
 
 
 @alerts_router.post("/archive")
-def archive_alerts(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)):
-    """Archive les alertes résolues de plus de N jours."""
-    count = AlertService(db).archive_old_alerts(days=days)
+def archive_alerts(request: Request, days: int = Query(0, ge=0, le=365), db: Session = Depends(get_db)):
+    """Archive les alertes résolues de plus de N jours (0 = toutes les résolues)."""
+    count = AlertService(db, user=get_current_user(request) or "système").archive_old_alerts(days=days)
     return {"message": f"{count} alerte(s) archivée(s)", "count": count}
 
 

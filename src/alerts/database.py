@@ -42,6 +42,7 @@ def init_db():
     migrations = [
         "ALTER TABLE alerts ADD COLUMN notes TEXT",
         "ALTER TABLE alerts ADD COLUMN tags VARCHAR(200)",
+        "ALTER TABLE audit_logs ADD COLUMN user VARCHAR(100)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

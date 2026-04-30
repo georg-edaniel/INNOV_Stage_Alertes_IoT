@@ -631,8 +631,13 @@ function updateSelection() {
 }
 
 async function archiveAlerts() {
-  if (!confirm('Archiver les alertes résolues de plus de 30 jours ? Elles seront déplacées dans /archived.')) return;
-  const r    = await fetch('/api/alerts/archive?days=30', { method: 'POST' });
+  const input = prompt('Archiver les alertes résolues de plus de N jours.\nEntrer 0 pour archiver toutes les alertes résolues :', '0');
+  if (input === null) return;
+  const days = parseInt(input);
+  if (isNaN(days) || days < 0) { alert('Valeur invalide.'); return; }
+  const label = days === 0 ? 'toutes les alertes résolues' : `les alertes résolues depuis plus de ${days} jour(s)`;
+  if (!confirm(`Archiver ${label} ? Elles seront déplacées dans /archived.`)) return;
+  const r    = await fetch(`/api/alerts/archive?days=${days}`, { method: 'POST' });
   const data = await r.json();
   alert(data.message);
   if (data.count > 0) location.reload();

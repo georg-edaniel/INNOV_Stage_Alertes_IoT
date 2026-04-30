@@ -14,8 +14,9 @@
     <table style="table-layout:fixed;width:100%;">
       <colgroup>
         <col style="width:55px;">
-        <col style="width:110px;">
+        <col style="width:120px;">
         <col style="width:80px;">
+        <col style="width:110px;">
         <col>
         <col style="width:160px;">
       </colgroup>
@@ -24,6 +25,7 @@
           <th style="text-align:center;">#</th>
           <th>Action</th>
           <th>Alerte</th>
+          <th>Utilisateur</th>
           <th>Détails</th>
           <th>Date</th>
         </tr>
@@ -43,6 +45,7 @@
             <a href="/alerts/{{ log.alert_id }}">#{{ log.alert_id }}</a>
             {% else %}—{% endif %}
           </td>
+          <td style="font-size:.82rem;color:var(--muted);">👤 {{ log.user }}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ log.details }}">{{ log.details }}</td>
           <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ log.created_at[:19] | replace('T',' ') }}</td>
         </tr>
