@@ -318,6 +318,34 @@ class AlertService:
             self.db.commit()
         return count
 
+    def unarchive(self, archived_id: int) -> Alert | None:
+        """Remet une alerte archivée dans la table alerts."""
+        a = self.db.query(ArchivedAlert).filter(ArchivedAlert.id == archived_id).first()
+        if not a:
+            return None
+        restored = Alert(
+            sensor       = a.sensor,
+            value        = a.value,
+            unit         = a.unit,
+            level        = a.level,
+            method       = a.method,
+            reason       = a.reason,
+            z_score      = a.z_score,
+            acknowledged = a.acknowledged,
+            resolved     = True,
+            notes        = a.notes,
+            tags         = a.tags,
+            created_at   = a.created_at,
+            resolved_at  = a.resolved_at,
+        )
+        self.db.add(restored)
+        self.db.delete(a)
+        self.db.flush()
+        self._audit("unarchive", restored.id, f"Alerte restaurée depuis les archives (archive #{archived_id})")
+        self.db.commit()
+        self.db.refresh(restored)
+        return restored
+
     def get_archived(self, limit: int = 50, offset: int = 0) -> list[ArchivedAlert]:
         return self.db.query(ArchivedAlert).order_by(desc(ArchivedAlert.archived_at)).offset(offset).limit(limit).all()
 

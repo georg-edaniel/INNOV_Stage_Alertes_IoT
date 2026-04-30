@@ -21,6 +21,7 @@
         <col>
         <col style="width:140px;">
         <col style="width:140px;">
+        <col style="width:100px;">
       </colgroup>
       <thead>
         <tr>
@@ -32,11 +33,12 @@
           <th>Raison</th>
           <th>Créée</th>
           <th>Archivée</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         {% for a in alerts %}
-        <tr>
+        <tr id="arch-row-{{ a.id }}">
           <td style="text-align:center;color:var(--muted);font-size:.8rem;">{{ a.id }}</td>
           <td style="text-align:center;color:var(--muted);font-size:.8rem;">#{{ a.original_id }}</td>
           <td><b>{{ a.sensor }}</b></td>
@@ -45,6 +47,9 @@
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
           <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ a.created_at[:19] | replace('T',' ') }}</td>
           <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ a.archived_at[:19] | replace('T',' ') }}</td>
+          <td style="text-align:center;">
+            <button class="btn btn-outline btn-sm" onclick="unarchive({{ a.id }})" title="Restaurer dans les alertes">↩ Restaurer</button>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -62,4 +67,20 @@
   {% if has_next %}<a href="?page={{ page + 1 }}" class="btn btn-outline btn-sm">Suivant →</a>{% endif %}
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function unarchive(id) {
+  if (!confirm('Restaurer cette alerte dans la liste des alertes actives ?')) return;
+  const r = await fetch(`/api/alerts/archived/${id}/unarchive`, { method: 'POST' });
+  if (r.ok) {
+    document.getElementById('arch-row-' + id).remove();
+    const h = document.querySelector('.page-title span');
+    if (h) h.textContent = (parseInt(h.textContent) - 1) + ' archivée(s)';
+  } else {
+    alert('Erreur lors de la restauration.');
+  }
+}
+</script>
 {% endblock %}

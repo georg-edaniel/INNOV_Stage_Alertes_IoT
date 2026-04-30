@@ -194,6 +194,15 @@ def archive_alerts(request: Request, days: int = Query(0, ge=0, le=365), db: Ses
     return {"message": f"{count} alerte(s) archivée(s)", "count": count}
 
 
+@alerts_router.post("/archived/{archived_id}/unarchive")
+def unarchive_alert(archived_id: int, request: Request, db: Session = Depends(get_db)):
+    """Remet une alerte archivée dans la table alerts."""
+    alert = AlertService(db, user=get_current_user(request) or "système").unarchive(archived_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerte archivée non trouvée")
+    return {"message": "Alerte restaurée", "alert": alert.to_dict()}
+
+
 # ── /api/logs ─────────────────────────────────────────────────────────────
 
 @logs_router.get("/stats")
