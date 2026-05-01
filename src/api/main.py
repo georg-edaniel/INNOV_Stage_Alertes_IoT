@@ -40,10 +40,12 @@ async def lifespan(app: FastAPI):
 
     init_db()
 
+    from ..alerts.database import SessionLocal
     _scheduler = SimulatorScheduler(
         interval_seconds=5,
         callback=lambda readings: push_tick(),
         anomaly_probability=0.20,
+        db_factory=SessionLocal,
     )
     _scheduler.start()
     logger.info("Simulateur IoT démarré (intervalle : 5s)")

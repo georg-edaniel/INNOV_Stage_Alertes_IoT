@@ -164,6 +164,79 @@
     </div>
   </div>
 </div>
+<!-- Fenêtres de maintenance -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>🔧 Fenêtres de maintenance</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+      Pendant une fenêtre de maintenance, les alertes du capteur ciblé sont supprimées. Utile pour les interventions planifiées.
+    </p>
+    <!-- Formulaire ajout -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto auto;gap:.7rem;align-items:flex-end;margin-bottom:1rem;flex-wrap:wrap;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Capteur</label>
+        <select id="mw-sensor" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="">Tous les capteurs</option>
+          <option value="temperature">🌡 Température</option>
+          <option value="turbidity">💧 Turbidité</option>
+          <option value="ph">⚗ pH</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Début</label>
+        <input type="datetime-local" id="mw-start" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Fin</label>
+        <input type="datetime-local" id="mw-end" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Raison</label>
+        <input type="text" id="mw-reason" placeholder="Intervention, maintenance préventive…" style="width:180px;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="addMaintenanceWindow()">➕ Ajouter</button>
+      </div>
+    </div>
+    <!-- Liste -->
+    <div id="mw-list">
+      {% if maintenance_windows %}
+      <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);">
+            <th style="text-align:left;padding:.4rem .6rem;">Capteur</th>
+            <th style="padding:.4rem .6rem;">Début</th>
+            <th style="padding:.4rem .6rem;">Fin</th>
+            <th style="text-align:left;padding:.4rem .6rem;">Raison</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in maintenance_windows %}
+          <tr id="mw-row-{{ w.id }}" style="border-bottom:1px solid var(--border);">
+            <td style="padding:.4rem .6rem;">
+              {% if w.sensor == 'all' %}🌐 Tous{% else %}{{ w.sensor }}{% endif %}
+              {% set now = now() if now is defined else '' %}
+              {% if w.start_dt <= report.generated_at|default('') <= w.end_dt %}
+              <span class="badge badge-warning" style="font-size:.7rem;">En cours</span>
+              {% endif %}
+            </td>
+            <td style="padding:.4rem .6rem;white-space:nowrap;color:var(--muted);font-size:.8rem;">{{ w.start_dt[:16] | replace('T',' ') }}</td>
+            <td style="padding:.4rem .6rem;white-space:nowrap;color:var(--muted);font-size:.8rem;">{{ w.end_dt[:16] | replace('T',' ') }}</td>
+            <td style="padding:.4rem .6rem;">{{ w.reason }}</td>
+            <td style="padding:.4rem;text-align:center;">
+              <button class="btn btn-danger btn-sm" onclick="deleteMW({{ w.id }})">🗑</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div style="color:var(--muted);font-size:.88rem;">Aucune fenêtre de maintenance configurée.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -201,16 +274,19 @@ async function saveThresholds(sensor) {
     statusEl.style.color = 'var(--success)';
     delete dirty[sensor];
     setTimeout(() => statusEl.textContent = '', 3000);
+    showToast(`Seuils ${sensor} enregistrés`, 'success');
   } else {
     statusEl.textContent = '✗ Erreur';
     statusEl.style.color = 'var(--critical)';
+    showToast('Erreur lors de l\'enregistrement', 'error');
   }
 }
 
 async function resetAll() {
   if (!confirm('Réinitialiser tous les seuils aux valeurs par défaut ?')) return;
   await fetch('/api/config/thresholds/reset', { method: 'POST' });
-  location.reload();
+  showToast('Seuils réinitialisés', 'info');
+  setTimeout(() => location.reload(), 700);
 }
 
 // Avertir si on quitte avec des changements non sauvegardés
@@ -303,6 +379,38 @@ async function saveAuth() {
     st.style.color = 'var(--critical)';
   }
   setTimeout(() => st.textContent = '', 4000);
+}
+
+// ── Fenêtres de maintenance ────────────────────────────────────
+async function addMaintenanceWindow() {
+  const sensor = document.getElementById('mw-sensor').value;
+  const start  = document.getElementById('mw-start').value;
+  const end    = document.getElementById('mw-end').value;
+  const reason = document.getElementById('mw-reason').value.trim();
+  if (!start || !end) { showToast('Renseigner le début et la fin', 'warning'); return; }
+  if (end <= start)   { showToast('La fin doit être postérieure au début', 'error'); return; }
+  const params = new URLSearchParams({ start_dt: start, end_dt: end });
+  if (sensor)  params.set('sensor', sensor);
+  if (reason)  params.set('reason', reason);
+  const r = await fetch('/api/config/maintenance?' + params.toString(), { method: 'POST' });
+  if (r.ok) {
+    showToast('Fenêtre de maintenance créée', 'success');
+    setTimeout(() => location.reload(), 800);
+  } else {
+    const d = await r.json().catch(() => ({}));
+    showToast(d.detail || 'Erreur lors de la création', 'error');
+  }
+}
+
+async function deleteMW(id) {
+  if (!confirm('Supprimer cette fenêtre de maintenance ?')) return;
+  const r = await fetch(`/api/config/maintenance/${id}`, { method: 'DELETE' });
+  if (r.ok) {
+    document.getElementById('mw-row-' + id)?.remove();
+    showToast('Fenêtre supprimée', 'info');
+  } else {
+    showToast('Erreur lors de la suppression', 'error');
+  }
 }
 
 // ── Email SMTP ─────────────────────────────────────────────────

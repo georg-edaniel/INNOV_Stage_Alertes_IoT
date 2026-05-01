@@ -65,6 +65,31 @@
 </div>
 
 <script>
+// ── Toasts ─────────────────────────────────────────────────────
+function showToast(message, type = 'info', duration = 3500) {
+  const colors = {
+    success: { bg: '#27ae60', icon: '✓' },
+    error:   { bg: '#e74c3c', icon: '✗' },
+    warning: { bg: '#f39c12', icon: '⚠' },
+    info:    { bg: '#1a5c9c', icon: 'ℹ' },
+  };
+  const c = colors[type] || colors.info;
+  const toast = document.createElement('div');
+  toast.style.cssText = `
+    background:${c.bg};color:#fff;padding:.75rem 1.1rem;border-radius:8px;
+    font-size:.88rem;box-shadow:0 4px 16px rgba(0,0,0,.25);
+    display:flex;align-items:center;gap:.6rem;pointer-events:auto;
+    max-width:320px;opacity:0;transition:opacity .2s ease;
+  `;
+  toast.innerHTML = `<b style="font-size:1rem;">${c.icon}</b><span>${message}</span>`;
+  document.getElementById('toast-container').appendChild(toast);
+  requestAnimationFrame(() => { toast.style.opacity = '1'; });
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 250);
+  }, duration);
+}
+
 // ── Dark mode ──────────────────────────────────────────────────
 (function() {
   if (localStorage.getItem('dark') === '1') {
@@ -267,6 +292,9 @@ function hideShortcutsModal() {
   document.getElementById('shortcuts-modal').style.display = 'none';
 }
 </script>
+
+<!-- ── Toasts ──────────────────────────────────────────────────── -->
+<div id="toast-container" style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:99999;display:flex;flex-direction:column;gap:.5rem;pointer-events:none;"></div>
 
 <!-- Modal raccourcis -->
 <div id="shortcuts-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)hideShortcutsModal()">

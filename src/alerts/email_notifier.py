@@ -94,3 +94,74 @@ def notify(alert: dict):
     if not cfg.get("active") or not cfg.get("to_addr"):
         return
     threading.Thread(target=_send, args=(alert, cfg), daemon=True).start()
+
+
+def _send_report(report_data: dict, days: int, cfg: dict):
+    try:
+        by_sensor = report_data.get("by_sensor", {})
+        rows_html = ""
+        for sensor, d in by_sensor.items():
+            rows_html += f"""
+            <tr>
+              <td style="padding:.4rem .8rem;">{sensor}</td>
+              <td style="padding:.4rem;text-align:center;">{d.get('total_alerts',0)}</td>
+              <td style="padding:.4rem;text-align:center;color:#e74c3c;font-weight:600;">{d.get('critical_alerts',0)}</td>
+              <td style="padding:.4rem;text-align:center;color:#f39c12;font-weight:600;">{d.get('warning_alerts',0)}</td>
+              <td style="padding:.4rem;text-align:center;">{d.get('readings_count',0)}</td>
+              <td style="padding:.4rem;text-align:center;">{d.get('avg_value') or '—'}</td>
+            </tr>"""
+
+        generated = report_data.get("generated_at", "")[:19].replace("T", " ")
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[Rapport IoT] {days} jour(s) — {generated[:10]}"
+        msg["From"]    = cfg["from_addr"] or cfg["username"]
+        msg["To"]      = cfg["to_addr"]
+
+        html = f"""<html><body style="font-family:sans-serif;color:#333;">
+        <div style="max-width:640px;margin:auto;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+          <div style="background:#1a5c9c;color:#fff;padding:1rem 1.5rem;">
+            <h2 style="margin:0;">📄 Rapport IoT — {days} jour(s)</h2>
+            <p style="margin:.3rem 0 0;font-size:.85rem;opacity:.8;">Généré le {generated} UTC</p>
+          </div>
+          <div style="padding:1.2rem 1.5rem;">
+            <p style="margin-top:0;">
+              <b>Total alertes :</b> {report_data.get('total_alerts',0)} &nbsp;·&nbsp;
+              <b>Total lectures :</b> {report_data.get('total_readings',0)}
+            </p>
+            <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+              <thead>
+                <tr style="background:#1a5c9c;color:#fff;">
+                  <th style="padding:.5rem .8rem;text-align:left;">Capteur</th>
+                  <th style="padding:.5rem;">Total</th>
+                  <th style="padding:.5rem;">Crit.</th>
+                  <th style="padding:.5rem;">Warn.</th>
+                  <th style="padding:.5rem;">Lectures</th>
+                  <th style="padding:.5rem;">Moy.</th>
+                </tr>
+              </thead>
+              <tbody style="border:1px solid #ddd;">{rows_html}</tbody>
+            </table>
+          </div>
+          <div style="background:#f5f5f5;padding:.8rem 1.5rem;font-size:.8rem;color:#888;">
+            Système d'alertes IoT — INNOV/CCNB 2026
+          </div>
+        </div></body></html>"""
+
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        with smtplib.SMTP(cfg["smtp_host"], int(cfg["smtp_port"]), timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            if cfg.get("username") and cfg.get("password"):
+                server.login(cfg["username"], cfg["password"])
+            server.sendmail(msg["From"], cfg["to_addr"], msg.as_string())
+    except Exception:
+        pass
+
+
+def send_report(report_data: dict, days: int) -> bool:
+    """Envoie le rapport par email. Retourne True si envoi lancé."""
+    cfg = _load()
+    if not cfg.get("active") or not cfg.get("to_addr"):
+        return False
+    threading.Thread(target=_send_report, args=(report_data, days, cfg), daemon=True).start()
+    return True

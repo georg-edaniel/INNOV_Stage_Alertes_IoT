@@ -10,6 +10,7 @@
     <a href="/report?days=7"  class="btn {% if days==7 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">7 j</a>
     <a href="/report?days=30" class="btn {% if days==30 %}btn-primary{% else %}btn-outline{% endif %} btn-sm">30 j</a>
     <button class="btn btn-outline btn-sm" onclick="exportReportPdf()">⬇ Export PDF</button>
+    <button class="btn btn-outline btn-sm" onclick="sendReportEmail()" title="Envoyer ce rapport par email SMTP">📧 Email</button>
   </div>
 </h1>
 
@@ -172,6 +173,16 @@
   </div>
 </div>
 
+<!-- Dernier signal par capteur -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>📡 Dernier signal capteur</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div id="last-seen-container" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;">
+      <div style="color:var(--muted);font-size:.85rem;">Chargement…</div>
+    </div>
+  </div>
+</div>
+
 <!-- Comparaison de périodes -->
 <div class="card" style="margin-top:1.5rem;margin-bottom:1.5rem;">
   <div class="card-header">
@@ -315,9 +326,24 @@ function updateCorr() {
   });
 }
 
-// ── Tendance long terme ───────────────────────────────────────
+// ── Tendance long terme avec prédiction linéaire ──────────────
 let _trendChart = null;
 const _trendColors = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
+
+function linearRegression(values) {
+  const n = values.length;
+  if (n < 2) return null;
+  const xs = values.map((_, i) => i);
+  const meanX = xs.reduce((a, b) => a + b, 0) / n;
+  const meanY = values.reduce((a, b) => a + b, 0) / n;
+  const num   = xs.reduce((acc, x, i) => acc + (x - meanX) * (values[i] - meanY), 0);
+  const den   = xs.reduce((acc, x) => acc + (x - meanX) ** 2, 0);
+  const slope = den !== 0 ? num / den : 0;
+  const intercept = meanY - slope * meanX;
+  // Prédire 3 points supplémentaires
+  const predictCount = 3;
+  return Array.from({ length: n + predictCount }, (_, i) => +(slope * i + intercept).toFixed(3));
+}
 
 async function loadTrend() {
   const s = document.getElementById('trend-sensor').value;
@@ -332,31 +358,96 @@ async function loadTrend() {
     sensorList.flatMap(sen => (data.sensors[sen] || []).map(p => p.date))
   )].sort();
 
-  const datasets = sensorList.map(sen => ({
-    label: sen,
-    data: allDates.map(date => {
+  // Étendre les labels avec des dates futures pour la prédiction
+  const lastDate = allDates[allDates.length - 1];
+  const extDates = [...allDates];
+  if (lastDate) {
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date(lastDate);
+      d.setDate(d.getDate() + i);
+      extDates.push(d.toISOString().slice(0, 10));
+    }
+  }
+
+  const datasets = [];
+  sensorList.forEach(sen => {
+    const vals = allDates.map(date => {
       const pt = (data.sensors[sen] || []).find(p => p.date === date);
       return pt ? pt.avg : null;
-    }),
-    borderColor: _trendColors[sen],
-    backgroundColor: _trendColors[sen] + '22',
-    tension: 0.3,
-    fill: false,
-    pointRadius: 2,
-    spanGaps: true,
-  }));
+    });
+    // Données réelles
+    datasets.push({
+      label: sen,
+      data: [...vals, null, null, null],
+      borderColor: _trendColors[sen],
+      backgroundColor: _trendColors[sen] + '22',
+      tension: 0.3,
+      fill: false,
+      pointRadius: 2,
+      spanGaps: true,
+    });
+    // Ligne de prédiction (régression)
+    const nonNull = vals.filter(v => v !== null);
+    const reg = linearRegression(nonNull);
+    if (reg && nonNull.length >= 3) {
+      const regFull = Array(vals.length).fill(null);
+      let idx = 0;
+      vals.forEach((v, i) => { if (v !== null) regFull[i] = reg[idx++]; });
+      const pred = [null, ...reg.slice(nonNull.length - 1, nonNull.length + 3)];
+      datasets.push({
+        label: `${sen} (tendance)`,
+        data: [...regFull, ...pred.slice(1)],
+        borderColor: _trendColors[sen] + '88',
+        borderDash: [5, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false,
+        tension: 0,
+        spanGaps: true,
+      });
+    }
+  });
 
   _trendChart = new Chart(document.getElementById('chartTrend'), {
     type: 'line',
-    data: { labels: allDates, datasets },
+    data: { labels: extDates, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
+      plugins: {
+        legend: { position: 'bottom', labels: { filter: item => !item.text.includes('tendance') || sensorList.length === 1 } },
+        tooltip: { filter: item => !item.dataset.label.includes('tendance') },
+      },
       scales: { y: { beginAtZero: false } }
     }
   });
 }
 loadTrend();
+
+// ── Dernier signal par capteur ────────────────────────────────
+async function loadLastSeen() {
+  const r = await fetch('/api/sensors/health');
+  const h = await r.json();
+  const container = document.getElementById('last-seen-container');
+  const icons = { temperature: '🌡', turbidity: '💧', ph: '⚗' };
+  container.innerHTML = Object.entries(h).map(([sensor, info]) => {
+    let age = '—', ageClass = '';
+    if (info.last_seen) {
+      const sec = Math.round((Date.now() - new Date(info.last_seen)) / 1000);
+      if (sec < 30)        { age = `il y a ${sec}s`; ageClass = 'color:var(--success)'; }
+      else if (sec < 120)  { age = `il y a ${sec}s`; ageClass = 'color:var(--warning)'; }
+      else                 { age = `il y a ${Math.floor(sec/60)}m`; ageClass = 'color:var(--critical)'; }
+    }
+    const lvlColor = { NORMAL: 'var(--success)', WARNING: 'var(--warning)', CRITICAL: 'var(--critical)' }[info.level] || 'var(--muted)';
+    return `
+      <div style="background:var(--bg-alt,rgba(0,0,0,.03));border:1px solid var(--border);border-radius:8px;padding:.9rem 1.1rem;">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:.4rem;">${icons[sensor]||''} ${sensor}</div>
+        <div style="font-size:1.15rem;font-weight:700;color:${lvlColor};">${info.value !== null ? info.value + ' ' + info.unit : '—'}</div>
+        <div style="font-size:.78rem;${ageClass};margin-top:.2rem;">${age}</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:.1rem;">${info.level}</div>
+      </div>`;
+  }).join('');
+}
+loadLastSeen();
 
 // ── Comparaison de périodes ───────────────────────────────────
 let _cmpChart = null;
@@ -410,6 +501,17 @@ async function loadComparison(period) {
   });
 }
 loadComparison('week');
+
+// ── Envoi rapport par email ───────────────────────────────────
+async function sendReportEmail() {
+  const r = await fetch(`/api/config/report/send-email?days=${days}`, { method: 'POST' });
+  if (r.ok) {
+    showToast('Rapport envoyé par email', 'success');
+  } else {
+    const d = await r.json().catch(() => ({}));
+    showToast(d.detail || 'Email non configuré — vérifier /config', 'error', 5000);
+  }
+}
 
 // ── Export PDF du rapport ─────────────────────────────────────
 async function exportReportPdf() {

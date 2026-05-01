@@ -120,19 +120,45 @@
   </div>
 </div>
 
-<!-- Commentaires opérateur -->
+<!-- Note unique opérateur -->
 <div class="card" style="margin-bottom:1.5rem;">
-  <div class="card-header"><h3>💬 Note opérateur</h3></div>
+  <div class="card-header"><h3>📝 Note opérateur</h3></div>
   <div class="card-body" style="padding:1.2rem;">
-    <textarea id="note-input" rows="4"
-      placeholder="Ajouter une note, description de la cause, action effectuée..."
+    <textarea id="note-input" rows="3"
+      placeholder="Note rapide, description de la cause, action effectuée..."
       style="width:100%;padding:.6rem .8rem;border:1px solid var(--border);border-radius:6px;font-size:.9rem;background:var(--bg);color:var(--text);resize:vertical;font-family:inherit;">{{ alert.notes }}</textarea>
     <div style="display:flex;align-items:center;gap:.8rem;margin-top:.7rem;">
-      <button class="btn btn-primary btn-sm" onclick="saveNote()">💾 Enregistrer la note</button>
+      <button class="btn btn-primary btn-sm" onclick="saveNote()">💾 Enregistrer</button>
       <span id="note-status" style="font-size:.8rem;color:var(--muted);"></span>
     </div>
   </div>
 </div>
+
+<!-- Commentaires multiples -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3>💬 Commentaires</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <div id="comments-list" style="margin-bottom:1rem;display:flex;flex-direction:column;gap:.6rem;">
+      <div style="color:var(--muted);font-size:.85rem;">Chargement…</div>
+    </div>
+    {% if not alert.resolved %}
+    <div style="display:flex;gap:.6rem;align-items:flex-end;">
+      <textarea id="comment-input" rows="2" placeholder="Ajouter un commentaire..."
+        style="flex:1;padding:.5rem .7rem;border:1px solid var(--border);border-radius:6px;font-size:.88rem;background:var(--bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
+      <button class="btn btn-primary btn-sm" onclick="addComment()" style="align-self:flex-end;">Envoyer</button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if alert.ack_reason %}
+<!-- Raison d'acquittement -->
+<div class="card" style="margin-bottom:1.5rem;border-left:4px solid var(--primary,#1a5c9c);">
+  <div class="card-body" style="padding:.8rem 1.2rem;font-size:.9rem;">
+    <b>👁 Acquittée avec raison :</b> {{ alert.ack_reason }}
+  </div>
+</div>
+{% endif %}
 
 <!-- Historique des actions opérateur -->
 <div class="card" style="margin-bottom:1.5rem;">
@@ -154,11 +180,25 @@
 <div style="display:flex;gap:.8rem;margin-top:1.5rem;flex-wrap:wrap;">
   {% if not alert.resolved %}
     {% if not alert.acknowledged %}
-    <button class="btn btn-outline" onclick="ack()">👁 Acquitter</button>
+    <button class="btn btn-outline" onclick="openAckModal()">👁 Acquitter</button>
     {% endif %}
     <button class="btn btn-success" onclick="resolve()">✅ Résoudre</button>
   {% endif %}
   <button class="btn btn-danger" onclick="deleteAlert()" style="margin-left:auto;">🗑 Supprimer</button>
+</div>
+
+<!-- Modal acquittement avec raison -->
+<div id="ack-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--card-bg,#fff);border-radius:10px;padding:1.5rem 2rem;max-width:440px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.25);">
+    <h3 style="margin:0 0 1rem;">👁 Acquitter l'alerte</h3>
+    <label style="font-size:.85rem;color:var(--muted);">Raison de l'acquittement (optionnel)</label>
+    <textarea id="ack-reason-input" rows="3" placeholder="Ex : Prise en charge, en investigation..."
+      style="width:100%;margin-top:.4rem;padding:.5rem .7rem;border:1px solid var(--border);border-radius:6px;font-size:.9rem;background:var(--bg);color:var(--text);resize:vertical;font-family:inherit;"></textarea>
+    <div style="display:flex;gap:.7rem;justify-content:flex-end;margin-top:1rem;">
+      <button class="btn btn-outline" onclick="closeAckModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="ack()">Acquitter</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -240,43 +280,78 @@ function toggleTag(tag) {
 }
 
 async function saveTags() {
-  const st = document.getElementById('tag-status');
-  st.textContent = 'Sauvegarde...';
   const tagsStr = Array.from(_activeTags).join(',');
   const r = await fetch(`/api/alerts/{{ alert.id }}/tags?tags=${encodeURIComponent(tagsStr)}`, { method: 'PATCH' });
-  if (r.ok) {
-    st.textContent = '✓ Tags enregistrés';
-    st.style.color = 'var(--success)';
-  } else {
-    st.textContent = '✗ Erreur';
-    st.style.color = 'var(--critical)';
-  }
-  setTimeout(() => st.textContent = '', 3000);
+  showToast(r.ok ? 'Tags enregistrés' : 'Erreur lors de l\'enregistrement', r.ok ? 'success' : 'error');
 }
 
 async function saveNote() {
   const note = document.getElementById('note-input').value;
-  const st   = document.getElementById('note-status');
-  st.textContent = 'Sauvegarde...';
   const r = await fetch(`/api/alerts/{{ alert.id }}/notes?note=${encodeURIComponent(note)}`, { method: 'PATCH' });
-  if (r.ok) {
-    st.textContent = '✓ Note enregistrée';
-    st.style.color = 'var(--success)';
-  } else {
-    st.textContent = '✗ Erreur';
-    st.style.color = 'var(--critical)';
-  }
-  setTimeout(() => st.textContent = '', 3000);
+  showToast(r.ok ? 'Note enregistrée' : 'Erreur lors de l\'enregistrement', r.ok ? 'success' : 'error');
 }
 
+// ── Modal acquittement ─────────────────────────────────────────
+function openAckModal() { document.getElementById('ack-modal').style.display = 'flex'; }
+function closeAckModal() { document.getElementById('ack-modal').style.display = 'none'; }
+document.getElementById('ack-modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) closeAckModal(); });
+
 async function ack() {
-  await fetch(`/api/alerts/{{ alert.id }}/acknowledge`, { method: 'PATCH' });
-  location.reload();
+  const reason = (document.getElementById('ack-reason-input')?.value || '').trim();
+  const url = `/api/alerts/{{ alert.id }}/acknowledge` + (reason ? `?reason=${encodeURIComponent(reason)}` : '');
+  const r = await fetch(url, { method: 'PATCH' });
+  if (r.ok) { showToast('Alerte acquittée', 'success'); setTimeout(() => location.reload(), 800); }
+  else showToast('Erreur lors de l\'acquittement', 'error');
+  closeAckModal();
 }
 async function resolve() {
-  await fetch(`/api/alerts/{{ alert.id }}/resolve`, { method: 'PATCH' });
-  location.reload();
+  const r = await fetch(`/api/alerts/{{ alert.id }}/resolve`, { method: 'PATCH' });
+  if (r.ok) { showToast('Alerte résolue', 'success'); setTimeout(() => location.reload(), 800); }
+  else showToast('Erreur lors de la résolution', 'error');
 }
+
+// ── Commentaires multiples ─────────────────────────────────────
+async function loadComments() {
+  const r = await fetch('/api/alerts/{{ alert.id }}/comments').catch(() => null);
+  if (!r || !r.ok) return;
+  const data = await r.json();
+  const list = document.getElementById('comments-list');
+  if (!data.comments.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:.85rem;">Aucun commentaire</div>';
+    return;
+  }
+  list.innerHTML = data.comments.map(c => `
+    <div style="background:var(--bg-alt,rgba(0,0,0,.03));border:1px solid var(--border);border-radius:6px;padding:.7rem .9rem;position:relative;">
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:.3rem;">
+        👤 <b>${c.user}</b> — ${c.created_at.slice(0,19).replace('T',' ')}
+        <button onclick="deleteComment(${c.id})" style="float:right;background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;" title="Supprimer">🗑</button>
+      </div>
+      <div style="font-size:.88rem;white-space:pre-wrap;">${c.content}</div>
+    </div>`).join('');
+}
+
+async function addComment() {
+  const input   = document.getElementById('comment-input');
+  const content = input.value.trim();
+  if (!content) return;
+  const r = await fetch(`/api/alerts/{{ alert.id }}/comments?content=${encodeURIComponent(content)}`, { method: 'POST' });
+  if (r.ok) {
+    input.value = '';
+    showToast('Commentaire ajouté', 'success');
+    loadComments();
+  } else {
+    showToast('Erreur lors de l\'ajout', 'error');
+  }
+}
+
+async function deleteComment(id) {
+  if (!confirm('Supprimer ce commentaire ?')) return;
+  const r = await fetch(`/api/alerts/{{ alert.id }}/comments/${id}`, { method: 'DELETE' });
+  if (r.ok) { showToast('Commentaire supprimé', 'info'); loadComments(); }
+  else showToast('Erreur', 'error');
+}
+
+loadComments();
 // ── Historique des actions opérateur ──────────────────────────
 (async () => {
   const r = await fetch('/api/logs/audit?alert_id={{ alert.id }}&limit=20').catch(() => null);
@@ -302,9 +377,10 @@ async function deleteAlert() {
   if (!confirm('Supprimer définitivement cette alerte ? Cette action est irréversible.')) return;
   const r = await fetch(`/api/alerts/{{ alert.id }}`, { method: 'DELETE' });
   if (r.ok) {
-    window.location.href = '/alerts';
+    showToast('Alerte supprimée', 'info');
+    setTimeout(() => { window.location.href = '/alerts'; }, 900);
   } else {
-    alert('Erreur lors de la suppression.');
+    showToast('Erreur lors de la suppression', 'error');
   }
 }
 </script>

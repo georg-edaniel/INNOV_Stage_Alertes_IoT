@@ -78,8 +78,9 @@ async function unarchive(id) {
     document.getElementById('arch-row-' + id).remove();
     const h = document.querySelector('.page-title span');
     if (h) h.textContent = (parseInt(h.textContent) - 1) + ' archivée(s)';
+    showToast('Alerte restaurée', 'success');
   } else {
-    alert('Erreur lors de la restauration.');
+    showToast('Erreur lors de la restauration', 'error');
   }
 }
 </script>

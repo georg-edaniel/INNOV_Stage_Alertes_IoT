@@ -34,8 +34,9 @@ class Alert(Base):
     z_score      = Column(Float, nullable=True)
     acknowledged = Column(Boolean, default=False, nullable=False)
     resolved     = Column(Boolean, default=False, nullable=False)
-    notes        = Column(Text, nullable=True)          # commentaires opérateur
+    notes        = Column(Text, nullable=True)          # note opérateur (champ unique)
     tags         = Column(String(200), nullable=True)   # labels CSV (matériel,réseau,…)
+    ack_reason   = Column(Text, nullable=True)          # raison de l'acquittement
     created_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     resolved_at  = Column(DateTime(timezone=True), nullable=True)
 
@@ -53,6 +54,7 @@ class Alert(Base):
             "resolved":     self.resolved,
             "notes":        self.notes or "",
             "tags":         self.tags or "",
+            "ack_reason":   self.ack_reason or "",
             "created_at":   self.created_at.isoformat() if self.created_at else None,
             "resolved_at":  self.resolved_at.isoformat() if self.resolved_at else None,
         }
@@ -120,6 +122,48 @@ class ArchivedAlert(Base):
             "created_at":   self.created_at.isoformat() if self.created_at else None,
             "resolved_at":  self.resolved_at.isoformat() if self.resolved_at else None,
             "archived_at":  self.archived_at.isoformat() if self.archived_at else None,
+        }
+
+
+class AlertComment(Base):
+    """Fil de commentaires multiples par alerte."""
+    __tablename__ = "alert_comments"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    alert_id   = Column(Integer, nullable=False, index=True)
+    user       = Column(String(100), nullable=False, default="système")
+    content    = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id":         self.id,
+            "alert_id":   self.alert_id,
+            "user":       self.user,
+            "content":    self.content,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class MaintenanceWindow(Base):
+    """Fenêtre de maintenance — suppression des alertes pendant la période planifiée."""
+    __tablename__ = "maintenance_windows"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    sensor     = Column(String(50), nullable=True)   # None = tous les capteurs
+    start_dt   = Column(DateTime(timezone=True), nullable=False)
+    end_dt     = Column(DateTime(timezone=True), nullable=False)
+    reason     = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "id":         self.id,
+            "sensor":     self.sensor or "all",
+            "start_dt":   self.start_dt.isoformat() if self.start_dt else None,
+            "end_dt":     self.end_dt.isoformat() if self.end_dt else None,
+            "reason":     self.reason or "",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 

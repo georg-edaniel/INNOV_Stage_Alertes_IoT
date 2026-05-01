@@ -8,6 +8,33 @@
   <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} entrée(s)</span>
 </h1>
 
+<!-- Filtres -->
+<form method="get" action="/audit">
+  <div class="filters" style="margin-bottom:1rem;">
+    <div class="filter-group">
+      <label>Action</label>
+      <select name="action" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+        <option value="">Toutes</option>
+        {% for a in ['acknowledge','acknowledge_all','resolve','delete','note','tag','archive','unarchive','comment','maintenance_add','maintenance_del'] %}
+        <option value="{{ a }}" {% if filter_action == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Date début</label>
+      <input type="date" name="date_from" value="{{ filter_date_from }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group">
+      <label>Date fin</label>
+      <input type="date" name="date_to" value="{{ filter_date_to }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group" style="align-self:flex-end;">
+      <button type="submit" class="btn btn-primary">Filtrer</button>
+      <a href="/audit" class="btn btn-outline">Reset</a>
+    </div>
+  </div>
+</form>
+
 <div class="card">
   <div class="card-body" style="padding:0;">
     {% if logs %}
@@ -59,10 +86,14 @@
 </div>
 
 {% if total_pages > 1 %}
+{% set qs = '' %}
+{% if filter_action %}{% set qs = qs + '&action=' + filter_action %}{% endif %}
+{% if filter_date_from %}{% set qs = qs + '&date_from=' + filter_date_from %}{% endif %}
+{% if filter_date_to %}{% set qs = qs + '&date_to=' + filter_date_to %}{% endif %}
 <div class="pagination">
-  {% if has_prev %}<a href="?page={{ page - 1 }}" class="btn btn-outline btn-sm">← Précédent</a>{% endif %}
+  {% if has_prev %}<a href="?page={{ page - 1 }}{{ qs }}" class="btn btn-outline btn-sm">← Précédent</a>{% endif %}
   <span style="font-size:.85rem;color:var(--muted);">Page {{ page }} / {{ total_pages }}</span>
-  {% if has_next %}<a href="?page={{ page + 1 }}" class="btn btn-outline btn-sm">Suivant →</a>{% endif %}
+  {% if has_next %}<a href="?page={{ page + 1 }}{{ qs }}" class="btn btn-outline btn-sm">Suivant →</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

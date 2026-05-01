@@ -28,11 +28,13 @@ logger = logging.getLogger(__name__)
 class SimulatorScheduler:
     """
     Planificateur qui déclenche le simulateur IoT à intervalle régulier.
+    Inclut aussi la détection des capteurs hors-ligne et l'escalade automatique.
 
     Args:
         interval_seconds: Fréquence d'émission des données (défaut : 5s).
         callback: Fonction appelée avec la liste de SensorReading à chaque cycle.
         anomaly_probability: Probabilité d'anomalie injectée par le simulateur.
+        db_factory: SessionLocal pour les jobs offline/escalade.
     """
 
     def __init__(
@@ -40,12 +42,14 @@ class SimulatorScheduler:
         interval_seconds: int = 5,
         callback: Callable[[list[SensorReading]], None] = None,
         anomaly_probability: float = 0.15,
+        db_factory=None,
     ):
         self.interval_seconds = interval_seconds
         self.callback         = callback or self._default_callback
         self.simulator        = IoTSimulator(anomaly_probability=anomaly_probability)
         self._scheduler       = BackgroundScheduler()
         self._running         = False
+        self._db_factory      = db_factory
 
     def start(self):
         if self._running:
@@ -57,6 +61,19 @@ class SimulatorScheduler:
             seconds=self.interval_seconds,
             id="iot_simulator",
         )
+        if self._db_factory:
+            self._scheduler.add_job(
+                self._check_offline,
+                trigger="interval",
+                seconds=30,
+                id="offline_check",
+            )
+            self._scheduler.add_job(
+                self._check_escalation,
+                trigger="interval",
+                seconds=60,
+                id="escalation_check",
+            )
         self._scheduler.start()
         self._running = True
         logger.info(f"Simulateur démarré — intervalle : {self.interval_seconds}s")
@@ -82,6 +99,30 @@ class SimulatorScheduler:
             self.callback(readings)
         except Exception as e:
             logger.error(f"Erreur simulateur : {e}")
+
+    def _check_offline(self):
+        if not self._db_factory:
+            return
+        db = self._db_factory()
+        try:
+            from ..alerts.service import AlertService
+            AlertService.check_offline_sensors(db)
+        except Exception as e:
+            logger.error(f"Erreur vérification hors-ligne : {e}")
+        finally:
+            db.close()
+
+    def _check_escalation(self):
+        if not self._db_factory:
+            return
+        db = self._db_factory()
+        try:
+            from ..alerts.service import AlertService
+            AlertService.check_escalation(db, escalation_minutes=10)
+        except Exception as e:
+            logger.error(f"Erreur vérification escalade : {e}")
+        finally:
+            db.close()
 
     @staticmethod
     def _default_callback(readings: list[SensorReading]):

@@ -104,8 +104,13 @@ def get_alert(alert_id: int, db: Session = Depends(get_db)):
 
 
 @alerts_router.patch("/{alert_id}/acknowledge")
-def acknowledge_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
-    alert = AlertService(db, user=get_current_user(request) or "système").acknowledge(alert_id)
+def acknowledge_alert(
+    alert_id: int,
+    request: Request,
+    reason: str = Query("", description="Raison de l'acquittement"),
+    db: Session = Depends(get_db),
+):
+    alert = AlertService(db, user=get_current_user(request) or "système").acknowledge(alert_id, reason=reason)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Alerte acquittée", "alert": alert.to_dict()}
@@ -203,6 +208,36 @@ def unarchive_alert(archived_id: int, request: Request, db: Session = Depends(ge
     return {"message": "Alerte restaurée", "alert": alert.to_dict()}
 
 
+@alerts_router.get("/{alert_id}/comments")
+def get_comments(alert_id: int, db: Session = Depends(get_db)):
+    """Retourne les commentaires d'une alerte."""
+    comments = AlertService(db).get_comments(alert_id)
+    return {"comments": [c.to_dict() for c in comments]}
+
+
+@alerts_router.post("/{alert_id}/comments")
+def add_comment(
+    alert_id: int,
+    request: Request,
+    content: str = Query(..., description="Contenu du commentaire"),
+    db: Session = Depends(get_db),
+):
+    """Ajoute un commentaire à une alerte."""
+    comment = AlertService(db, user=get_current_user(request) or "système").add_comment(alert_id, content)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": "Commentaire ajouté", "comment": comment.to_dict()}
+
+
+@alerts_router.delete("/{alert_id}/comments/{comment_id}")
+def delete_comment(alert_id: int, comment_id: int, db: Session = Depends(get_db)):
+    """Supprime un commentaire."""
+    deleted = AlertService(db).delete_comment(comment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Commentaire non trouvé")
+    return {"message": "Commentaire supprimé"}
+
+
 # ── /api/logs ─────────────────────────────────────────────────────────────
 
 @logs_router.get("/stats")
@@ -259,15 +294,21 @@ def get_comparison(
 
 @logs_router.get("/audit")
 def get_audit(
-    alert_id: int | None = Query(None),
+    alert_id:  int | None  = Query(None),
+    action:    str | None  = Query(None, description="Filtrer par action"),
+    date_from: str | None  = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to:   str | None  = Query(None, description="ISO date YYYY-MM-DD"),
     limit:  int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     """Journal d'audit des actions opérateur."""
+    from datetime import datetime, timezone, timedelta
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
     svc   = AlertService(db)
-    logs  = svc.get_audit_log(alert_id=alert_id, limit=limit, offset=offset)
-    total = svc.count_audit_log(alert_id=alert_id)
+    logs  = svc.get_audit_log(alert_id=alert_id, action=action, date_from=df, date_to=dt, limit=limit, offset=offset)
+    total = svc.count_audit_log(alert_id=alert_id, action=action, date_from=df, date_to=dt)
     return {"logs": [l.to_dict() for l in logs], "total": total}
 
 
@@ -432,6 +473,60 @@ def set_webhook(
     """Configure le webhook de notification (alertes CRITICAL)."""
     from ..alerts.notifier import set_config
     return set_config(url=url, active=active, fmt=format)
+
+
+@config_router.get("/maintenance")
+def get_maintenance_windows(db: Session = Depends(get_db)):
+    """Retourne toutes les fenêtres de maintenance."""
+    windows = AlertService(db).get_maintenance_windows()
+    return {"windows": [w.to_dict() for w in windows]}
+
+
+@config_router.post("/maintenance")
+def create_maintenance_window(
+    request:  Request,
+    sensor:   str | None = Query(None, description="Capteur ciblé (None = tous)"),
+    start_dt: str = Query(..., description="Début ISO datetime"),
+    end_dt:   str = Query(..., description="Fin ISO datetime"),
+    reason:   str = Query("", description="Raison de la maintenance"),
+    db: Session = Depends(get_db),
+):
+    """Crée une fenêtre de maintenance."""
+    from datetime import datetime, timezone
+    try:
+        sd = datetime.fromisoformat(start_dt).replace(tzinfo=timezone.utc)
+        ed = datetime.fromisoformat(end_dt).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(400, "Format datetime invalide (utiliser ISO 8601)")
+    if ed <= sd:
+        raise HTTPException(400, "La date de fin doit être postérieure à la date de début")
+    svc = AlertService(db, user=get_current_user(request) or "système")
+    mw  = svc.create_maintenance_window(sensor=sensor, start_dt=sd, end_dt=ed, reason=reason)
+    return {"message": "Fenêtre de maintenance créée", "window": mw.to_dict()}
+
+
+@config_router.delete("/maintenance/{mw_id}")
+def delete_maintenance_window(mw_id: int, request: Request, db: Session = Depends(get_db)):
+    """Supprime une fenêtre de maintenance."""
+    deleted = AlertService(db, user=get_current_user(request) or "système").delete_maintenance_window(mw_id)
+    if not deleted:
+        raise HTTPException(404, "Fenêtre de maintenance non trouvée")
+    return {"message": "Fenêtre supprimée"}
+
+
+@config_router.post("/report/send-email")
+def send_report_email(
+    days: int = Query(1, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """Envoie le rapport par email SMTP."""
+    from ..alerts.email_notifier import send_report
+    svc  = AlertService(db)
+    data = svc.get_report_data(days=days)
+    sent = send_report(data, days)
+    if not sent:
+        raise HTTPException(400, "Email non configuré ou inactif — vérifier la configuration SMTP")
+    return {"message": f"Rapport {days}j envoyé par email"}
 
 
 @config_router.get("/email")

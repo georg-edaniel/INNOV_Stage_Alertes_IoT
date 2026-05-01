@@ -166,23 +166,36 @@ def report_page(
 
 
 @dashboard_router.get("/config", response_class=HTMLResponse)
-def config_page(request: Request):
+def config_page(request: Request, db: Session = Depends(get_db)):
     """Page de configuration des seuils."""
     from ..alerts.threshold_config import get_all
+    svc     = AlertService(db)
+    windows = svc.get_maintenance_windows()
     return templates.TemplateResponse(request, "thresholds.html", {
         "thresholds": get_all(),
+        "maintenance_windows": [w.to_dict() for w in windows],
     })
 
 
 @dashboard_router.get("/audit", response_class=HTMLResponse)
-def audit_page(request: Request, page: int = 1, db: Session = Depends(get_db)):
+def audit_page(
+    request:   Request,
+    action:    str | None = None,
+    date_from: str | None = None,
+    date_to:   str | None = None,
+    page:      int = 1,
+    db: Session = Depends(get_db),
+):
     """Page journal d'audit des actions opérateur."""
+    from datetime import datetime, timezone, timedelta
     PER = 30
     svc    = AlertService(db)
     page   = max(1, page)
     offset = (page - 1) * PER
-    logs   = svc.get_audit_log(limit=PER, offset=offset)
-    total  = svc.count_audit_log()
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+    logs   = svc.get_audit_log(action=action or None, date_from=df, date_to=dt, limit=PER, offset=offset)
+    total  = svc.count_audit_log(action=action or None, date_from=df, date_to=dt)
     total_pages = max(1, (total + PER - 1) // PER)
     return templates.TemplateResponse(request, "audit.html", {
         "logs":        [l.to_dict() for l in logs],
@@ -191,6 +204,9 @@ def audit_page(request: Request, page: int = 1, db: Session = Depends(get_db)):
         "total":       total,
         "has_prev":    page > 1,
         "has_next":    page < total_pages,
+        "filter_action":    action or "",
+        "filter_date_from": date_from or "",
+        "filter_date_to":   date_to or "",
     })
 
 

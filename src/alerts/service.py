@@ -14,7 +14,7 @@ from sqlalchemy import desc, and_
 
 from ..detection.levels import AlertLevel, DetectionResult
 from ..simulator.generator import SensorReading
-from .models import Alert, SensorLog, AuditLog, ArchivedAlert
+from .models import Alert, SensorLog, AuditLog, ArchivedAlert, AlertComment, MaintenanceWindow
 
 # Délai minimum entre deux alertes identiques (même capteur + même niveau)
 DEDUP_WINDOW_SECONDS = 60
@@ -185,14 +185,19 @@ class AlertService:
     # Actions opérateur
     # ------------------------------------------------------------------
 
-    def acknowledge(self, alert_id: int) -> Alert | None:
-        """Marque une alerte comme vue par un opérateur."""
+    def acknowledge(self, alert_id: int, reason: str = "") -> Alert | None:
+        """Marque une alerte comme vue par un opérateur (avec raison optionnelle)."""
         alert = self.get_by_id(alert_id)
         if alert and not alert.acknowledged:
             alert.acknowledged = True
+            if reason.strip():
+                alert.ack_reason = reason.strip()
             self.db.commit()
             self.db.refresh(alert)
-            self._audit("acknowledge", alert_id, f"Alerte #{alert_id} acquittée")
+            details = f"Alerte #{alert_id} acquittée"
+            if reason.strip():
+                details += f" — raison : {reason.strip()}"
+            self._audit("acknowledge", alert_id, details)
         return alert
 
     def resolve(self, alert_id: int) -> Alert | None:
@@ -256,6 +261,147 @@ class AlertService:
         return count
 
     # ------------------------------------------------------------------
+    # Commentaires multiples
+    # ------------------------------------------------------------------
+
+    def add_comment(self, alert_id: int, content: str) -> AlertComment | None:
+        """Ajoute un commentaire à une alerte."""
+        alert = self.get_by_id(alert_id)
+        if not alert:
+            return None
+        comment = AlertComment(alert_id=alert_id, user=self.user, content=content.strip())
+        self.db.add(comment)
+        self.db.commit()
+        self.db.refresh(comment)
+        self._audit("comment", alert_id, f"Commentaire ajouté par {self.user}")
+        return comment
+
+    def get_comments(self, alert_id: int) -> list[AlertComment]:
+        """Retourne tous les commentaires d'une alerte."""
+        return self.db.query(AlertComment).filter(
+            AlertComment.alert_id == alert_id
+        ).order_by(AlertComment.created_at).all()
+
+    def delete_comment(self, comment_id: int) -> bool:
+        """Supprime un commentaire. Retourne True si supprimé."""
+        c = self.db.query(AlertComment).filter(AlertComment.id == comment_id).first()
+        if c:
+            self.db.delete(c)
+            self.db.commit()
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Fenêtres de maintenance
+    # ------------------------------------------------------------------
+
+    def get_maintenance_windows(self) -> list[MaintenanceWindow]:
+        return self.db.query(MaintenanceWindow).order_by(desc(MaintenanceWindow.start_dt)).all()
+
+    def create_maintenance_window(
+        self, sensor: str | None, start_dt: datetime, end_dt: datetime, reason: str = ""
+    ) -> MaintenanceWindow:
+        mw = MaintenanceWindow(sensor=sensor or None, start_dt=start_dt, end_dt=end_dt, reason=reason)
+        self.db.add(mw)
+        self.db.commit()
+        self.db.refresh(mw)
+        label = sensor or "tous capteurs"
+        self._audit("maintenance_add", None, f"Maintenance créée : {label} {start_dt.isoformat()[:16]} → {end_dt.isoformat()[:16]}")
+        return mw
+
+    def delete_maintenance_window(self, mw_id: int) -> bool:
+        mw = self.db.query(MaintenanceWindow).filter(MaintenanceWindow.id == mw_id).first()
+        if mw:
+            self._audit("maintenance_del", None, f"Fenêtre maintenance #{mw_id} supprimée")
+            self.db.delete(mw)
+            self.db.commit()
+            return True
+        return False
+
+    def is_in_maintenance(self, sensor: str) -> bool:
+        """Retourne True si le capteur est actuellement en maintenance."""
+        now = datetime.now(timezone.utc)
+        from sqlalchemy import or_
+        count = self.db.query(MaintenanceWindow).filter(
+            MaintenanceWindow.start_dt <= now,
+            MaintenanceWindow.end_dt >= now,
+            or_(MaintenanceWindow.sensor == sensor, MaintenanceWindow.sensor == None),  # noqa
+        ).count()
+        return count > 0
+
+    # ------------------------------------------------------------------
+    # Détection hors-ligne + escalade (appelées par le scheduler)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def check_offline_sensors(db: Session):
+        """Crée une alerte CRITICAL si un capteur n'a pas émis depuis >60s."""
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        for sensor in ["temperature", "turbidity", "ph"]:
+            log = db.query(SensorLog).filter(
+                SensorLog.sensor == sensor
+            ).order_by(desc(SensorLog.created_at)).first()
+
+            # Normaliser le timezone du log
+            last_ts = None
+            if log:
+                last_ts = log.created_at
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+            if last_ts is None or last_ts < cutoff:
+                # Vérifier si une alerte "hors ligne" non résolue existe déjà
+                existing = db.query(Alert).filter(
+                    Alert.sensor   == sensor,
+                    Alert.level    == "CRITICAL",
+                    Alert.resolved == False,  # noqa
+                    Alert.method   == "offline",
+                ).first()
+                if not existing:
+                    svc = AlertService(db)
+                    if not svc.is_in_maintenance(sensor):
+                        alert = Alert(
+                            sensor=sensor, value=0.0, unit="",
+                            level="CRITICAL", method="offline",
+                            reason=f"Capteur {sensor} hors ligne — aucun signal depuis >60s",
+                        )
+                        db.add(alert)
+                        db.commit()
+                        db.refresh(alert)
+                        try:
+                            from .notifier import notify as webhook_notify
+                            webhook_notify(alert.to_dict())
+                        except Exception:
+                            pass
+                        try:
+                            from .email_notifier import notify as email_notify
+                            email_notify(alert.to_dict())
+                        except Exception:
+                            pass
+
+    @staticmethod
+    def check_escalation(db: Session, escalation_minutes: int = 10):
+        """Re-notifie si une alerte CRITICAL n'est pas acquittée depuis N minutes."""
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=escalation_minutes)
+        unacked = db.query(Alert).filter(
+            Alert.level        == "CRITICAL",
+            Alert.acknowledged == False,  # noqa
+            Alert.resolved     == False,  # noqa
+            Alert.created_at   <= cutoff,
+        ).all()
+        for alert in unacked:
+            try:
+                from .notifier import notify as webhook_notify
+                webhook_notify({**alert.to_dict(), "escalation": True})
+            except Exception:
+                pass
+            try:
+                from .email_notifier import notify as email_notify
+                email_notify(alert.to_dict())
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
     # Audit
     # ------------------------------------------------------------------
 
@@ -268,17 +414,43 @@ class AlertService:
         except Exception:
             pass
 
-    def get_audit_log(self, alert_id: int | None = None, limit: int = 50, offset: int = 0) -> list[AuditLog]:
-        """Retourne le journal d'audit, filtré par alerte si demandé."""
+    def get_audit_log(
+        self,
+        alert_id:  int | None      = None,
+        action:    str | None      = None,
+        date_from: datetime | None = None,
+        date_to:   datetime | None = None,
+        limit:  int = 50,
+        offset: int = 0,
+    ) -> list[AuditLog]:
+        """Retourne le journal d'audit avec filtres optionnels."""
         q = self.db.query(AuditLog)
         if alert_id is not None:
             q = q.filter(AuditLog.alert_id == alert_id)
+        if action:
+            q = q.filter(AuditLog.action == action)
+        if date_from:
+            q = q.filter(AuditLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(AuditLog.created_at <= date_to)
         return q.order_by(desc(AuditLog.created_at)).offset(offset).limit(limit).all()
 
-    def count_audit_log(self, alert_id: int | None = None) -> int:
+    def count_audit_log(
+        self,
+        alert_id:  int | None      = None,
+        action:    str | None      = None,
+        date_from: datetime | None = None,
+        date_to:   datetime | None = None,
+    ) -> int:
         q = self.db.query(AuditLog)
         if alert_id is not None:
             q = q.filter(AuditLog.alert_id == alert_id)
+        if action:
+            q = q.filter(AuditLog.action == action)
+        if date_from:
+            q = q.filter(AuditLog.created_at >= date_from)
+        if date_to:
+            q = q.filter(AuditLog.created_at <= date_to)
         return q.count()
 
     # ------------------------------------------------------------------

@@ -48,6 +48,8 @@
     <div class="filter-group" style="align-self:flex-end;">
       <button type="submit" class="btn btn-primary">Filtrer</button>
       <a href="/alerts" class="btn btn-outline">Reset</a>
+      <button type="button" class="btn btn-outline" onclick="saveFilters()" title="Sauvegarder ces filtres">💾 Sauvegarder</button>
+      <button type="button" class="btn btn-outline" onclick="loadFilters()" title="Charger les filtres sauvegardés">📂 Charger</button>
     </div>
   </div>
 </form>
@@ -634,13 +636,36 @@ async function archiveAlerts() {
   const input = prompt('Archiver les alertes résolues de plus de N jours.\nEntrer 0 pour archiver toutes les alertes résolues :', '0');
   if (input === null) return;
   const days = parseInt(input);
-  if (isNaN(days) || days < 0) { alert('Valeur invalide.'); return; }
+  if (isNaN(days) || days < 0) { showToast('Valeur invalide.', 'error'); return; }
   const label = days === 0 ? 'toutes les alertes résolues' : `les alertes résolues depuis plus de ${days} jour(s)`;
   if (!confirm(`Archiver ${label} ? Elles seront déplacées dans /archived.`)) return;
   const r    = await fetch(`/api/alerts/archive?days=${days}`, { method: 'POST' });
   const data = await r.json();
-  alert(data.message);
-  if (data.count > 0) location.reload();
+  showToast(data.message, data.count > 0 ? 'success' : 'info');
+  if (data.count > 0) setTimeout(() => location.reload(), 1000);
+}
+
+// ── Filtres sauvegardés ────────────────────────────────────────
+function saveFilters() {
+  const f = {
+    sensor:    document.querySelector('[name="sensor"]')?.value || '',
+    level:     document.querySelector('[name="level"]')?.value || '',
+    resolved:  document.querySelector('[name="resolved"]')?.value || '',
+    q:         document.querySelector('[name="q"]')?.value || '',
+    date_from: document.querySelector('[name="date_from"]')?.value || '',
+    date_to:   document.querySelector('[name="date_to"]')?.value || '',
+  };
+  localStorage.setItem('alert_filters', JSON.stringify(f));
+  showToast('Filtres sauvegardés', 'success');
+}
+
+function loadFilters() {
+  const saved = localStorage.getItem('alert_filters');
+  if (!saved) { showToast('Aucun filtre sauvegardé', 'warning'); return; }
+  const f = JSON.parse(saved);
+  const qs = new URLSearchParams();
+  Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
+  window.location.href = '/alerts?' + qs.toString();
 }
 
 async function deleteSelected() {
@@ -657,11 +682,11 @@ async function deleteSelected() {
     });
     document.getElementById('btn-delete-sel').style.display = 'none';
     document.getElementById('chk-all').checked = false;
-    // Met à jour le compteur dans le header
     const h = document.querySelector('.card-header h3');
     if (h) h.textContent = h.textContent.replace(/\d+ alerte/, m => (parseInt(m) - d.count) + ' alerte');
+    showToast(`${d.count} alerte(s) supprimée(s)`, 'success');
   } else {
-    alert('Erreur lors de la suppression.');
+    showToast('Erreur lors de la suppression', 'error');
   }
 }
 
