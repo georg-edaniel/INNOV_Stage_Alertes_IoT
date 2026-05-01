@@ -151,17 +151,80 @@ def update_auth_config(enabled: bool, username: str, password: str | None = None
     return get_auth_config()
 
 
-def add_user(username: str, password: str, role: str = "operator") -> dict:
-    """Ajoute un utilisateur avec un rôle donné."""
+def add_user(
+    username: str,
+    password: str,
+    role: str = "operator",
+    display_name: str = "",
+    email: str = "",
+    phone: str = "",
+) -> dict:
+    """Ajoute un utilisateur avec un rôle et des données personnelles."""
     cfg = _load_config()
     if "users" not in cfg:
         cfg["users"] = {}
     cfg["users"][username] = {
-        "password_hash": hashlib.sha256(password.encode()).hexdigest(),
-        "role": role,
+        "password_hash":  hashlib.sha256(password.encode()).hexdigest(),
+        "role":           role,
+        "display_name":   display_name or username,
+        "email":          email,
+        "phone":          phone,
     }
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     return get_auth_config()
+
+
+def update_user_profile(
+    username: str,
+    display_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    password: str | None = None,
+) -> dict:
+    """Met à jour le profil d'un utilisateur existant (y compris l'admin principal)."""
+    cfg = _load_config()
+    users = cfg.get("users", {})
+    if username in users:
+        u = users[username]
+        if display_name is not None: u["display_name"] = display_name
+        if email        is not None: u["email"]        = email
+        if phone        is not None: u["phone"]        = phone
+        if password:                 u["password_hash"] = hashlib.sha256(password.encode()).hexdigest()
+    elif username == cfg.get("username"):
+        # Admin principal stocké à la racine du config
+        if display_name is not None: cfg["display_name"] = display_name
+        if email        is not None: cfg["email"]        = email
+        if phone        is not None: cfg["phone"]        = phone
+        if password:                 cfg["password_hash"] = hashlib.sha256(password.encode()).hexdigest()
+    else:
+        return {}
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    return get_user_profile(username)
+
+
+def get_user_profile(username: str) -> dict:
+    """Retourne le profil public d'un utilisateur (sans le hash)."""
+    cfg   = _load_config()
+    users = cfg.get("users", {})
+    if username in users:
+        u = users[username]
+        return {
+            "username":     username,
+            "display_name": u.get("display_name", username),
+            "email":        u.get("email", ""),
+            "phone":        u.get("phone", ""),
+            "role":         u.get("role", "viewer"),
+        }
+    # Admin principal
+    if username == cfg.get("username"):
+        return {
+            "username":     username,
+            "display_name": cfg.get("display_name", username),
+            "email":        cfg.get("email", ""),
+            "phone":        cfg.get("phone", ""),
+            "role":         cfg.get("default_role", "admin"),
+        }
+    return {}
 
 
 def remove_user(username: str) -> dict:

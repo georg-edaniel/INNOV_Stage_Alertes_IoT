@@ -650,18 +650,55 @@ def list_users(request: Request):
 
 @config_router.post("/auth/users")
 def create_user(
-    request:  Request,
-    username: str = Query(...),
-    password: str = Query(...),
-    role:     str = Query("operator", description="admin | operator | viewer"),
+    request:      Request,
+    username:     str = Query(...),
+    password:     str = Query(...),
+    role:         str = Query("operator", description="admin | operator | viewer"),
+    display_name: str = Query("", description="Nom affiché"),
+    email:        str = Query("", description="Adresse email"),
+    phone:        str = Query("", description="Téléphone"),
 ):
-    """Crée un utilisateur avec un rôle."""
+    """Crée un utilisateur avec un rôle et des données personnelles."""
     from .auth import add_user, is_admin
     if not is_admin(request):
         raise HTTPException(403, "Accès réservé aux administrateurs")
     if role not in ("admin", "operator", "viewer"):
         raise HTTPException(400, "Rôle invalide")
-    return add_user(username, password, role)
+    return add_user(username, password, role, display_name=display_name, email=email, phone=phone)
+
+
+@config_router.get("/auth/profile")
+def get_my_profile(request: Request):
+    """Retourne le profil de l'utilisateur connecté."""
+    from .auth import get_user_profile, get_current_user
+    username = get_current_user(request) or "guest"
+    return get_user_profile(username)
+
+
+@config_router.post("/auth/profile")
+def update_my_profile(
+    request:      Request,
+    display_name: str | None = Query(None),
+    email:        str | None = Query(None),
+    phone:        str | None = Query(None),
+    password:     str | None = Query(None),
+):
+    """Met à jour le profil de l'utilisateur connecté."""
+    from .auth import update_user_profile, get_current_user
+    username = get_current_user(request) or "guest"
+    return update_user_profile(username, display_name=display_name, email=email, phone=phone, password=password or None)
+
+
+@config_router.get("/auth/users/{username}/profile")
+def get_user_profile_admin(username: str, request: Request):
+    """Retourne le profil d'un utilisateur (admin uniquement)."""
+    from .auth import get_user_profile, is_admin
+    if not is_admin(request):
+        raise HTTPException(403, "Accès réservé aux administrateurs")
+    profile = get_user_profile(username)
+    if not profile:
+        raise HTTPException(404, "Utilisateur non trouvé")
+    return profile
 
 
 @config_router.delete("/auth/users/{username}")

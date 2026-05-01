@@ -242,6 +242,18 @@ def archived_page(
     })
 
 
+@dashboard_router.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request):
+    """Page profil de l'utilisateur connecté."""
+    from .auth import get_current_user, get_user_profile
+    username = get_current_user(request) or "guest"
+    profile  = get_user_profile(username)
+    return templates.TemplateResponse(request, "profile.html", {
+        "profile": profile,
+        "username": username,
+    })
+
+
 @dashboard_router.get("/params", response_class=HTMLResponse)
 def params_page(request: Request, db: Session = Depends(get_db)):
     """Page paramètres unifiée — seuils, notifications, sécurité, capteurs."""

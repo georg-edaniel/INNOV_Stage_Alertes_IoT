@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% set active = "profile" %}
+{% block title %}Mon profil{% endblock %}
+
+{% block content %}
+<h1 class="page-title">👤 Mon profil</h1>
+
+<div style="max-width:620px;">
+
+  <!-- Carte profil -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-body" style="padding:1.5rem;">
+      <div style="display:flex;align-items:center;gap:1.2rem;margin-bottom:1.5rem;">
+        <!-- Avatar initiales -->
+        <div id="avatar-circle" style="width:64px;height:64px;border-radius:50%;background:var(--primary,#1a5c9c);
+             display:flex;align-items:center;justify-content:center;font-size:1.6rem;font-weight:700;color:#fff;flex-shrink:0;">
+          {{ (profile.display_name or profile.username or '?')[0] | upper }}
+        </div>
+        <div>
+          <div style="font-size:1.15rem;font-weight:700;">{{ profile.display_name or profile.username }}</div>
+          <div style="font-size:.85rem;color:var(--muted);">{{ profile.username }}</div>
+          <span class="badge badge-{% if profile.role == 'admin' %}critical{% elif profile.role == 'operator' %}warning{% else %}normal{% endif %}"
+                style="margin-top:.3rem;display:inline-block;">
+            {{ profile.role or 'guest' }}
+          </span>
+        </div>
+      </div>
+
+      <div id="profile-msg" style="min-height:1.2rem;font-size:.85rem;margin-bottom:.8rem;"></div>
+
+      <div style="display:grid;gap:.9rem;">
+
+        <div>
+          <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;">Nom affiché</label>
+          <input type="text" id="p-display" value="{{ profile.display_name or '' }}"
+            placeholder="{{ profile.username }}"
+            style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:.92rem;">
+        </div>
+
+        <div>
+          <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;">Adresse email</label>
+          <input type="email" id="p-email" value="{{ profile.email or '' }}"
+            placeholder="exemple@domaine.com"
+            style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:.92rem;">
+        </div>
+
+        <div>
+          <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;">Téléphone</label>
+          <input type="tel" id="p-phone" value="{{ profile.phone or '' }}"
+            placeholder="+1 (506) 555-0000"
+            style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:.92rem;">
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:.2rem 0;">
+
+        <div>
+          <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;">Nouveau mot de passe</label>
+          <input type="password" id="p-pass" placeholder="Laisser vide pour ne pas modifier"
+            style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:.92rem;">
+        </div>
+
+        <div>
+          <label style="display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;">Confirmer le mot de passe</label>
+          <input type="password" id="p-pass2" placeholder="••••••••"
+            style="width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:.92rem;">
+        </div>
+
+        <div>
+          <button class="btn btn-primary" onclick="saveProfile()" style="width:100%;padding:.6rem;">
+            💾 Enregistrer mes informations
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Infos compte -->
+  <div class="card">
+    <div class="card-header"><h3>ℹ️ Informations du compte</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <table style="width:100%;font-size:.9rem;border-collapse:collapse;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.5rem .8rem;color:var(--muted);width:40%;">Identifiant</td>
+          <td style="padding:.5rem .8rem;font-weight:600;">{{ profile.username or username }}</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.5rem .8rem;color:var(--muted);">Rôle</td>
+          <td style="padding:.5rem .8rem;">
+            {% if profile.role == 'admin' %}
+              <span style="color:var(--critical);font-weight:600;">Admin</span> — accès complet
+            {% elif profile.role == 'operator' %}
+              <span style="color:var(--warning);font-weight:600;">Operator</span> — acquitter, résoudre, noter
+            {% else %}
+              <span style="color:var(--success);font-weight:600;">Viewer</span> — lecture seule
+            {% endif %}
+          </td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.5rem .8rem;color:var(--muted);">Email</td>
+          <td style="padding:.5rem .8rem;" id="info-email">{{ profile.email or '—' }}</td>
+        </tr>
+        <tr>
+          <td style="padding:.5rem .8rem;color:var(--muted);">Téléphone</td>
+          <td style="padding:.5rem .8rem;" id="info-phone">{{ profile.phone or '—' }}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveProfile() {
+  const display = document.getElementById('p-display').value.trim();
+  const email   = document.getElementById('p-email').value.trim();
+  const phone   = document.getElementById('p-phone').value.trim();
+  const pass    = document.getElementById('p-pass').value;
+  const pass2   = document.getElementById('p-pass2').value;
+  const msg     = document.getElementById('profile-msg');
+
+  if (pass && pass !== pass2) {
+    msg.textContent = '✗ Les mots de passe ne correspondent pas.';
+    msg.style.color = 'var(--critical)';
+    return;
+  }
+
+  const params = new URLSearchParams({ display_name: display, email, phone });
+  if (pass) params.set('password', pass);
+
+  const r = await fetch('/api/config/auth/profile?' + params.toString(), { method: 'POST' });
+
+  if (r.ok) {
+    const data = await r.json();
+    msg.textContent = '✓ Profil enregistré avec succès.';
+    msg.style.color = 'var(--success)';
+
+    // Mettre à jour l'affichage
+    const avatarEl  = document.getElementById('avatar-circle');
+    const name = data.display_name || data.username || '?';
+    avatarEl.textContent = name[0].toUpperCase();
+    avatarEl.nextElementSibling.firstElementChild.textContent = name;
+
+    document.getElementById('info-email').textContent = data.email || '—';
+    document.getElementById('info-phone').textContent = data.phone || '—';
+
+    if (pass) document.getElementById('p-pass').value = document.getElementById('p-pass2').value = '';
+    showToast('Profil mis à jour', 'success');
+  } else {
+    const d = await r.json().catch(() => ({}));
+    msg.textContent = '✗ ' + (d.detail || 'Erreur lors de la sauvegarde.');
+    msg.style.color = 'var(--critical)';
+    showToast('Erreur sauvegarde profil', 'error');
+  }
+
+  setTimeout(() => msg.textContent = '', 5000);
+}
+
+// Soumettre avec Entrée
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && ['p-display','p-email','p-phone','p-pass','p-pass2'].includes(e.target.id)) {
+    saveProfile();
+  }
+});
+</script>
+{% endblock %}

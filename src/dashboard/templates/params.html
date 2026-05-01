@@ -230,14 +230,14 @@
       <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
         Rôles : <b>admin</b> (tout), <b>operator</b> (acquitter / résoudre / noter), <b>viewer</b> (lecture seule).
       </p>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.7rem;align-items:flex-end;margin-bottom:1rem;flex-wrap:wrap;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.7rem;margin-bottom:.7rem;flex-wrap:wrap;">
         <div>
-          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur</label>
-          <input type="text" id="nu-user" placeholder="ex: operateur1" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur <span style="color:var(--critical);">*</span></label>
+          <input type="text" id="nu-user" placeholder="ex: daniel.moumie" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
         </div>
         <div>
-          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe</label>
-          <input type="password" id="nu-pass" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom affiché</label>
+          <input type="text" id="nu-display" placeholder="ex: Daniel Moumie" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
         </div>
         <div>
           <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Rôle</label>
@@ -247,7 +247,21 @@
             <option value="admin">admin</option>
           </select>
         </div>
-        <div><button class="btn btn-primary btn-sm" onclick="addUser()">➕ Ajouter</button></div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe <span style="color:var(--critical);">*</span></label>
+          <input type="password" id="nu-pass" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Email</label>
+          <input type="email" id="nu-email" placeholder="email@exemple.com" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Téléphone</label>
+          <input type="tel" id="nu-phone" placeholder="+1 506 555-0000" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <button class="btn btn-primary btn-sm" onclick="addUser()">➕ Créer l'utilisateur</button>
       </div>
       <div id="users-list"><div style="color:var(--muted);font-size:.85rem;">Chargement…</div></div>
     </div>
@@ -546,26 +560,46 @@ async function loadUsers(){
   const entries=Object.entries(users);
   if(!entries.length){el.innerHTML='<div style="color:var(--muted);font-size:.85rem;">Aucun utilisateur secondaire.</div>';return;}
   const rc={admin:'var(--critical)',operator:'var(--warning)',viewer:'var(--success)'};
-  let html='<table style="width:100%;border-collapse:collapse;font-size:.88rem;"><thead><tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:.4rem .6rem;">Utilisateur</th><th style="padding:.4rem .6rem;">Rôle</th><th></th></tr></thead><tbody>';
+  let html=`<table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+    <thead><tr style="border-bottom:2px solid var(--border);">
+      <th style="text-align:left;padding:.4rem .6rem;">Identifiant</th>
+      <th style="text-align:left;padding:.4rem .6rem;">Nom affiché</th>
+      <th style="text-align:left;padding:.4rem .6rem;">Email</th>
+      <th style="padding:.4rem .6rem;">Rôle</th>
+      <th style="padding:.4rem .6rem;">Profil</th>
+      <th></th>
+    </tr></thead><tbody>`;
   entries.forEach(([u,info])=>{
     html+=`<tr id="user-row-${u}" style="border-bottom:1px solid var(--border);">
-      <td style="padding:.4rem .6rem;">${u}</td>
-      <td style="padding:.4rem .6rem;"><span style="font-weight:600;color:${rc[info.role]||'var(--text)'};">${info.role}</span></td>
-      <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteUser('${u}')">🗑</button></td></tr>`;
+      <td style="padding:.4rem .6rem;font-weight:600;">${u}</td>
+      <td style="padding:.4rem .6rem;">${info.display_name||'—'}</td>
+      <td style="padding:.4rem .6rem;color:var(--muted);font-size:.82rem;">${info.email||'—'}</td>
+      <td style="padding:.4rem .6rem;text-align:center;"><span style="font-weight:600;color:${rc[info.role]||'var(--text)'};">${info.role}</span></td>
+      <td style="padding:.4rem .6rem;text-align:center;"><a href="/profile" class="btn btn-outline btn-sm">✏️</a></td>
+      <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteUser('${u}')">🗑</button></td>
+    </tr>`;
   });
   html+='</tbody></table>';
   el.innerHTML=html;
 }
 
 async function addUser(){
-  const u=document.getElementById('nu-user').value.trim();
-  const p=document.getElementById('nu-pass').value;
-  const r=document.getElementById('nu-role').value;
-  if(!u||!p){showToast('Nom et mot de passe requis','warning');return;}
-  const params=new URLSearchParams({username:u,password:p,role:r});
+  const u    = document.getElementById('nu-user').value.trim();
+  const p    = document.getElementById('nu-pass').value;
+  const r    = document.getElementById('nu-role').value;
+  const disp = document.getElementById('nu-display').value.trim();
+  const em   = document.getElementById('nu-email').value.trim();
+  const ph   = document.getElementById('nu-phone').value.trim();
+  if(!u||!p){showToast('Identifiant et mot de passe requis','warning');return;}
+  const params=new URLSearchParams({username:u,password:p,role:r,display_name:disp,email:em,phone:ph});
   const res=await fetch('/api/config/auth/users?'+params.toString(),{method:'POST'});
-  if(res.ok){showToast(`Utilisateur "${u}" créé`,'success');document.getElementById('nu-user').value='';document.getElementById('nu-pass').value='';loadUsers();}
-  else{const d=await res.json().catch(()=>({}));showToast(d.detail||'Erreur','error');}
+  if(res.ok){
+    showToast(`Utilisateur "${disp||u}" créé`,'success');
+    ['nu-user','nu-display','nu-pass','nu-email','nu-phone'].forEach(id=>document.getElementById(id).value='');
+    loadUsers();
+  } else {
+    const d=await res.json().catch(()=>({}));showToast(d.detail||'Erreur','error');
+  }
 }
 
 async function deleteUser(username){
