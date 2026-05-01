@@ -562,7 +562,8 @@ async function addUser(){
   const p=document.getElementById('nu-pass').value;
   const r=document.getElementById('nu-role').value;
   if(!u||!p){showToast('Nom et mot de passe requis','warning');return;}
-  const res=await fetch(`/api/config/auth/users?username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}&role=${r}`,{method:'POST'});
+  const params=new URLSearchParams({username:u,password:p,role:r});
+  const res=await fetch('/api/config/auth/users?'+params.toString(),{method:'POST'});
   if(res.ok){showToast(`Utilisateur "${u}" créé`,'success');document.getElementById('nu-user').value='';document.getElementById('nu-pass').value='';loadUsers();}
   else{const d=await res.json().catch(()=>({}));showToast(d.detail||'Erreur','error');}
 }

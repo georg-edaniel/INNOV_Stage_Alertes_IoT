@@ -653,6 +653,7 @@ async function addUser() {
   if (!u || !p) { showToast('Nom d\'utilisateur et mot de passe requis', 'warning'); return; }
   const params = new URLSearchParams({ username: u, password: p, role: r });
   const res = await fetch('/api/config/auth/users?' + params.toString(), { method: 'POST' });
+  // Note: URLSearchParams encode correctement tous les caractères spéciaux (@, +, etc.)
   if (res.ok) {
     showToast(`Utilisateur "${u}" créé avec le rôle ${r}`, 'success');
     document.getElementById('nu-user').value = '';

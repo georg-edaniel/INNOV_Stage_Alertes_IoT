@@ -2,5 +2,12 @@
   "enabled": false,
   "username": "admin",
   "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-  "session_secret": "6bccbfe561514c6e5e32a756897a149231776175e22018fa2873ef6d2360761a"
+  "session_secret": "6bccbfe561514c6e5e32a756897a149231776175e22018fa2873ef6d2360761a",
+  "users": {
+    "Daniel Moumie": {
+      "password_hash": "8040984126324712c18e7fe0e377357f70517f25f6b61dca5be2acda792f2fdc",
+      "role": "operator"
+    }
+  },
+  "default_role": "admin"
 }
