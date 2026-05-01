@@ -238,6 +238,41 @@ def delete_comment(alert_id: int, comment_id: int, db: Session = Depends(get_db)
     return {"message": "Commentaire supprimé"}
 
 
+# ── /api/ingest — données réelles depuis capteurs externes ────
+ingest_router = APIRouter()
+
+@ingest_router.post("")
+def ingest_reading(
+    sensor: str  = Query(..., description="Nom du capteur : temperature | turbidity | ph"),
+    value:  float = Query(..., description="Valeur mesurée"),
+    unit:   str  = Query("",  description="Unité de mesure"),
+    api_key: str = Query("", description="Clé API optionnelle"),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint pour soumettre une lecture depuis un vrai capteur IoT.
+    Exemple : POST /api/ingest?sensor=temperature&value=28.5&unit=°C
+    """
+    VALID = {"temperature", "turbidity", "ph"}
+    if sensor not in VALID:
+        raise HTTPException(400, f"Capteur invalide — valeurs acceptées : {', '.join(VALID)}")
+
+    from ..simulator.generator import SensorReading
+    reading = SensorReading(sensor=sensor, value=value, unit=unit or "?", scenario="external")
+
+    result  = _engine.analyze(reading)
+    svc     = AlertService(db, user="capteur_externe")
+    alert   = svc.process(result, reading)
+
+    return {
+        "sensor":  sensor,
+        "value":   value,
+        "level":   result.level.value,
+        "reason":  result.reason,
+        "alert":   alert.to_dict() if alert else None,
+    }
+
+
 # ── /api/logs ─────────────────────────────────────────────────────────────
 
 @logs_router.get("/stats")
@@ -450,6 +485,35 @@ def reset_thresholds():
     return {"message": "Seuils réinitialisés aux valeurs par défaut"}
 
 
+@config_router.get("/thresholds/adaptive")
+def get_adaptive_thresholds(
+    days: int = Query(7, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """Calcule des seuils adaptatifs basés sur l'historique des N derniers jours."""
+    return AlertService(db).compute_adaptive_thresholds(days=days)
+
+
+@config_router.post("/thresholds/apply-adaptive")
+def apply_adaptive_thresholds(
+    days:   int = Query(7, ge=1, le=30),
+    sensor: str = Query(..., description="temperature | turbidity | ph"),
+    db: Session = Depends(get_db),
+):
+    """Applique les seuils adaptatifs calculés pour un capteur donné."""
+    from ..alerts.threshold_config import update_sensor
+    if sensor not in ("temperature", "turbidity", "ph"):
+        raise HTTPException(400, "Capteur invalide")
+    suggestions = AlertService(db).compute_adaptive_thresholds(days=days)
+    s = suggestions.get(sensor, {})
+    if "error" in s:
+        raise HTTPException(400, s["error"])
+    sg = s["suggested"]
+    for zone in ("normal", "warning", "critical"):
+        update_sensor(sensor, zone, sg[zone]["min"], sg[zone]["max"])
+    return {"message": f"Seuils adaptatifs appliqués pour {sensor}", "applied": sg}
+
+
 @config_router.get("/thresholds/history")
 def get_threshold_history(limit: int = Query(30, ge=1, le=100)):
     """Retourne l'historique des modifications de seuils."""
@@ -529,6 +593,27 @@ def send_report_email(
     return {"message": f"Rapport {days}j envoyé par email"}
 
 
+@config_router.get("/report-schedule")
+def get_report_schedule():
+    """Retourne la configuration du rapport automatique."""
+    from ..alerts.report_scheduler import load_report_schedule
+    return load_report_schedule()
+
+
+@config_router.post("/report-schedule")
+def set_report_schedule(
+    active:      bool = Query(False),
+    frequency:   str  = Query("daily", description="daily | weekly"),
+    hour:        int  = Query(8, ge=0, le=23),
+    days_period: int  = Query(1, description="1 | 7 | 30"),
+):
+    """Configure l'envoi automatique du rapport par email."""
+    from ..alerts.report_scheduler import save_report_schedule
+    if frequency not in ("daily", "weekly"):
+        raise HTTPException(400, "frequency doit être 'daily' ou 'weekly'")
+    return save_report_schedule(active=active, frequency=frequency, hour=hour, days_period=days_period)
+
+
 @config_router.get("/email")
 def get_email_config():
     """Retourne la configuration email SMTP (sans mot de passe)."""
@@ -552,6 +637,62 @@ def set_auth_config_endpoint(
     """Configure l'authentification (activer/désactiver + changer le mot de passe)."""
     from .auth import update_auth_config
     return update_auth_config(enabled=enabled, username=username, password=password or None)
+
+
+@config_router.get("/auth/users")
+def list_users(request: Request):
+    """Liste les utilisateurs (admin uniquement)."""
+    from .auth import get_auth_config, is_admin
+    if not is_admin(request):
+        raise HTTPException(403, "Accès réservé aux administrateurs")
+    return get_auth_config()
+
+
+@config_router.post("/auth/users")
+def create_user(
+    request:  Request,
+    username: str = Query(...),
+    password: str = Query(...),
+    role:     str = Query("operator", description="admin | operator | viewer"),
+):
+    """Crée un utilisateur avec un rôle."""
+    from .auth import add_user, is_admin
+    if not is_admin(request):
+        raise HTTPException(403, "Accès réservé aux administrateurs")
+    if role not in ("admin", "operator", "viewer"):
+        raise HTTPException(400, "Rôle invalide")
+    return add_user(username, password, role)
+
+
+@config_router.delete("/auth/users/{username}")
+def delete_user(username: str, request: Request):
+    """Supprime un utilisateur."""
+    from .auth import remove_user, is_admin
+    if not is_admin(request):
+        raise HTTPException(403, "Accès réservé aux administrateurs")
+    return remove_user(username)
+
+
+@config_router.get("/zones")
+def get_zones():
+    """Retourne la configuration des zones géographiques par capteur."""
+    from ..alerts.zones_config import load_zones
+    return load_zones()
+
+
+@config_router.post("/zones/{sensor}")
+def update_zone(
+    sensor: str,
+    zone:  str   = Query(None, description="Nom de la zone"),
+    label: str   = Query(None, description="Label du capteur"),
+    lat:   float = Query(None, description="Latitude"),
+    lon:   float = Query(None, description="Longitude"),
+):
+    """Met à jour la zone géographique d'un capteur."""
+    from ..alerts.zones_config import update_sensor_zone
+    if sensor not in ("temperature", "turbidity", "ph"):
+        raise HTTPException(400, "Capteur invalide")
+    return update_sensor_zone(sensor=sensor, zone=zone, label=label, lat=lat, lon=lon)
 
 
 @config_router.post("/email")

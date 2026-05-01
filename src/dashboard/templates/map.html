@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% set active = "map" %}
+{% block title %}Carte des capteurs{% endblock %}
+
+{% block content %}
+<h1 class="page-title">🗺 Carte des capteurs IoT</h1>
+
+<div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
+  <div style="font-size:.88rem;color:var(--muted);">Mise à jour automatique toutes les 10 secondes.</div>
+  <div style="display:flex;gap:.8rem;align-items:center;font-size:.82rem;">
+    <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#27ae60;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 2px #27ae60;"></span> Normal</span>
+    <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#f39c12;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 2px #f39c12;"></span> Warning</span>
+    <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#e74c3c;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 2px #e74c3c;"></span> Critical</span>
+    <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#95a5a6;display:inline-block;border:2px solid #fff;box-shadow:0 0 0 2px #95a5a6;"></span> Inconnu</span>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="refreshMarkers()">🔄 Actualiser</button>
+  <a href="/config" class="btn btn-outline btn-sm">⚙️ Configurer les zones</a>
+</div>
+
+<!-- Carte Leaflet -->
+<div id="map" style="height:520px;border-radius:12px;border:1px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,.08);"></div>
+
+<!-- Tableau récapitulatif -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>📡 État des capteurs</h3></div>
+  <div class="card-body" style="padding:0;">
+    <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border);">
+          <th style="text-align:left;padding:.6rem 1rem;">Capteur</th>
+          <th style="text-align:left;padding:.6rem 1rem;">Zone</th>
+          <th style="text-align:center;padding:.6rem 1rem;">Niveau</th>
+          <th style="text-align:center;padding:.6rem 1rem;">Valeur</th>
+          <th style="text-align:center;padding:.6rem 1rem;">Coordonnées</th>
+        </tr>
+      </thead>
+      <tbody id="sensor-table">
+        {% for s in sensors %}
+        <tr id="row-{{ s.sensor }}" style="border-bottom:1px solid var(--border);">
+          <td style="padding:.5rem 1rem;font-weight:600;">{{ s.label }}</td>
+          <td style="padding:.5rem 1rem;color:var(--muted);">{{ s.zone }}</td>
+          <td style="padding:.5rem 1rem;text-align:center;">
+            <span id="level-{{ s.sensor }}" class="badge badge-{{ s.level|lower }}">{{ s.level }}</span>
+          </td>
+          <td style="padding:.5rem 1rem;text-align:center;" id="val-{{ s.sensor }}">
+            {% if s.value is not none %}{{ s.value }} {{ s.unit }}{% else %}—{% endif %}
+          </td>
+          <td style="padding:.5rem 1rem;text-align:center;font-size:.8rem;color:var(--muted);">
+            {{ "%.4f"|format(s.lat) }}, {{ "%.4f"|format(s.lon) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Leaflet.js -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// Données initiales depuis le serveur
+const _initSensors = {{ sensors | tojson }};
+
+// ── Couleurs par niveau ──────────────────────────────────────────
+const _levelColors = {
+  NORMAL:   '#27ae60',
+  WARNING:  '#f39c12',
+  CRITICAL: '#e74c3c',
+  unknown:  '#95a5a6',
+};
+
+// ── Icône SVG circulaire Leaflet ─────────────────────────────────
+function makeIcon(color) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="13" fill="${color}" stroke="white" stroke-width="3"/>
+    <circle cx="16" cy="16" r="5" fill="white" opacity="0.7"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
+  });
+}
+
+// ── Initialiser la carte ─────────────────────────────────────────
+// Centre sur le barycentre des capteurs ou position par défaut
+const validSensors = _initSensors.filter(s => s.lat !== 0 || s.lon !== 0);
+let centerLat = 46.814;
+let centerLon = -71.208;
+if (validSensors.length) {
+  centerLat = validSensors.reduce((s, x) => s + x.lat, 0) / validSensors.length;
+  centerLon = validSensors.reduce((s, x) => s + x.lon, 0) / validSensors.length;
+}
+
+const map = L.map('map').setView([centerLat, centerLon], 14);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+}).addTo(map);
+
+// ── Créer les marqueurs initiaux ─────────────────────────────────
+const _markers = {};
+
+function buildPopup(s) {
+  const lvlColor = _levelColors[s.level] || _levelColors.unknown;
+  const valStr   = s.value !== null && s.value !== undefined ? `${s.value} ${s.unit}` : '—';
+  return `
+    <div style="min-width:160px;font-family:sans-serif;">
+      <b style="font-size:.95rem;">${s.label}</b>
+      <div style="color:#666;font-size:.8rem;margin-bottom:.4rem;">${s.zone || 'Sans zone'}</div>
+      <div style="font-size:.9rem;">
+        Niveau : <b style="color:${lvlColor};">${s.level}</b>
+      </div>
+      <div style="font-size:.9rem;">Valeur : <b>${valStr}</b></div>
+      <hr style="margin:.5rem 0;border:none;border-top:1px solid #eee;">
+      <a href="/alerts?sensor=${s.sensor}" style="font-size:.8rem;color:#1a5c9c;">Voir les alertes →</a>
+    </div>`;
+}
+
+_initSensors.forEach(s => {
+  if (s.lat === 0 && s.lon === 0) return;
+  const color  = _levelColors[s.level] || _levelColors.unknown;
+  const marker = L.marker([s.lat, s.lon], { icon: makeIcon(color) })
+    .addTo(map)
+    .bindPopup(buildPopup(s));
+  _markers[s.sensor] = marker;
+});
+
+// ── Mise à jour polling 10s ──────────────────────────────────────
+async function refreshMarkers() {
+  try {
+    const [healthR, zonesR] = await Promise.all([
+      fetch('/api/sensors/health'),
+      fetch('/api/config/zones'),
+    ]);
+    const health = await healthR.json();
+    const zones  = await zonesR.json();
+
+    Object.entries(zones).forEach(([sensor, z]) => {
+      const h     = health[sensor] || {};
+      const level = h.level || 'unknown';
+      const value = h.value ?? null;
+      const unit  = h.unit  || '';
+      const color = _levelColors[level] || _levelColors.unknown;
+
+      // Mettre à jour le tableau
+      const lvlEl = document.getElementById('level-' + sensor);
+      const valEl = document.getElementById('val-'   + sensor);
+      if (lvlEl) {
+        lvlEl.textContent = level;
+        lvlEl.className = `badge badge-${level.toLowerCase()}`;
+      }
+      if (valEl) valEl.textContent = value !== null ? `${value} ${unit}` : '—';
+
+      // Mettre à jour le marqueur
+      const lat = z.lat || 0;
+      const lon = z.lon || 0;
+      if (lat === 0 && lon === 0) return;
+
+      const sData = { sensor, label: z.label || sensor, zone: z.zone || '', lat, lon, level, value, unit };
+
+      if (_markers[sensor]) {
+        _markers[sensor].setIcon(makeIcon(color));
+        _markers[sensor].setPopupContent(buildPopup(sData));
+        _markers[sensor].setLatLng([lat, lon]);
+      } else {
+        const marker = L.marker([lat, lon], { icon: makeIcon(color) })
+          .addTo(map)
+          .bindPopup(buildPopup(sData));
+        _markers[sensor] = marker;
+      }
+    });
+  } catch (e) {
+    console.warn('Erreur mise à jour carte :', e);
+  }
+}
+
+setInterval(refreshMarkers, 10000);
+
+// Adapter la carte si le thème sombre est actif
+if (document.body.classList.contains('dark')) {
+  document.getElementById('map').style.filter = 'invert(90%) hue-rotate(180deg)';
+}
+document.getElementById('dark-toggle-btn').addEventListener('click', () => {
+  setTimeout(() => {
+    const isDark = document.body.classList.contains('dark');
+    document.getElementById('map').style.filter = isDark ? 'invert(90%) hue-rotate(180deg)' : '';
+  }, 50);
+});
+</script>
+{% endblock %}

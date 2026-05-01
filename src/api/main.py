@@ -16,7 +16,7 @@ from ..alerts.database import init_db
 from ..simulator.scheduler import SimulatorScheduler
 from .routers import (
     alerts_router, logs_router, sensors_router,
-    simulator_router, config_router,
+    simulator_router, config_router, ingest_router,
 )
 from .dashboard import dashboard_router
 from .stream import stream_router, push_tick
@@ -99,6 +99,7 @@ app.include_router(logs_router,        prefix="/api/logs",       tags=["Historiq
 app.include_router(sensors_router,     prefix="/api/sensors",    tags=["Capteurs"])
 app.include_router(simulator_router,   prefix="/api/simulator",  tags=["Simulateur"])
 app.include_router(config_router,      prefix="/api/config",     tags=["Configuration"])
+app.include_router(ingest_router,      prefix="/api/ingest",     tags=["Ingest externe"])
 
 
 @app.get("/health", tags=["Health"])

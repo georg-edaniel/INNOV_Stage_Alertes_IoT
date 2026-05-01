@@ -44,8 +44,22 @@
   {% endfor %}
 </div>
 
-<div style="margin-top:1rem;">
-  <button class="btn btn-danger btn-sm" onclick="resetAll()">🔄 Réinitialiser tout aux valeurs par défaut</button>
+<div style="margin-top:1rem;display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;">
+  <button class="btn btn-danger btn-sm" onclick="resetAll()">🔄 Réinitialiser aux valeurs par défaut</button>
+  <button class="btn btn-outline btn-sm" onclick="showAdaptive()">🧠 Seuils adaptatifs (basés sur l'historique)</button>
+  <select id="adaptive-days" style="padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem;">
+    <option value="7">7 jours</option><option value="14">14 jours</option><option value="30">30 jours</option>
+  </select>
+</div>
+
+<!-- Panel seuils adaptatifs -->
+<div id="adaptive-panel" style="display:none;margin-top:1rem;">
+  <div class="card">
+    <div class="card-header"><h3>🧠 Seuils adaptatifs suggérés</h3></div>
+    <div class="card-body" style="padding:1.2rem;" id="adaptive-body">
+      <div style="color:var(--muted);">Chargement…</div>
+    </div>
+  </div>
 </div>
 
 <!-- Webhook Notifications -->
@@ -88,6 +102,36 @@
     </div>
   </div>
 </div>
+<!-- Gestion des utilisateurs -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>👥 Gestion des utilisateurs</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Rôles : <b>admin</b> (tout), <b>operator</b> (acquitter/résoudre/noter), <b>viewer</b> (lecture seule).</p>
+    <!-- Formulaire ajout -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.7rem;align-items:flex-end;margin-bottom:1rem;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur</label>
+        <input type="text" id="nu-user" placeholder="ex: operateur1" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe</label>
+        <input type="password" id="nu-pass" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Rôle</label>
+        <select id="nu-role" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="viewer">viewer (lecture)</option>
+          <option value="operator" selected>operator</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div><button class="btn btn-primary btn-sm" onclick="addUser()">➕ Ajouter</button></div>
+    </div>
+    <!-- Liste existants -->
+    <div id="users-list"><div style="color:var(--muted);font-size:.85rem;">Chargement…</div></div>
+  </div>
+</div>
+
 <!-- Authentification -->
 <div class="card" style="margin-top:2rem;">
   <div class="card-header"><h3>🔐 Authentification</h3></div>
@@ -114,6 +158,44 @@
     </div>
     <div style="margin-top:.8rem;padding:.6rem .9rem;background:var(--bg-alt,rgba(0,0,0,.03));border-radius:6px;font-size:.8rem;color:var(--muted);">
       <b>Identifiants par défaut :</b> admin / admin — Changez-les immédiatement si vous activez l'authentification.
+    </div>
+  </div>
+</div>
+
+<!-- Rapport automatique -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>📅 Rapport automatique par email</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Envoie automatiquement le rapport d'activité par email selon la fréquence choisie. Nécessite la configuration SMTP ci-dessous.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.8rem;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Fréquence</label>
+        <select id="rs-freq" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="daily">Quotidien</option>
+          <option value="weekly">Hebdomadaire (lundi)</option>
+        </select>
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Heure d'envoi (UTC)</label>
+        <input type="number" id="rs-hour" value="8" min="0" max="23" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Période du rapport</label>
+        <select id="rs-days" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="1">24 heures</option>
+          <option value="7">7 jours</option>
+          <option value="30">30 jours</option>
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" onclick="saveReportSchedule()">💾 Enregistrer</button>
+      </div>
+    </div>
+    <div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;">
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" id="rs-active"> Activer le rapport automatique
+      </label>
+      <span id="rs-status" style="font-size:.8rem;color:var(--muted);"></span>
     </div>
   </div>
 </div>
@@ -164,6 +246,16 @@
     </div>
   </div>
 </div>
+<!-- Zones géographiques capteurs -->
+<div class="card" style="margin-top:2rem;">
+  <div class="card-header"><h3>🗺 Zones géographiques des capteurs</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Associe chaque capteur à une zone et des coordonnées GPS pour la <a href="/map" style="color:var(--primary);">carte interactive</a>.</p>
+    <div id="zones-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;"></div>
+    <div id="zones-status" style="font-size:.8rem;margin-top:.6rem;color:var(--muted);"></div>
+  </div>
+</div>
+
 <!-- Fenêtres de maintenance -->
 <div class="card" style="margin-top:2rem;">
   <div class="card-header"><h3>🔧 Fenêtres de maintenance</h3></div>
@@ -381,6 +473,47 @@ async function saveAuth() {
   setTimeout(() => st.textContent = '', 4000);
 }
 
+// ── Seuils adaptatifs ──────────────────────────────────────────
+async function showAdaptive() {
+  const panel = document.getElementById('adaptive-panel');
+  const body  = document.getElementById('adaptive-body');
+  const days  = document.getElementById('adaptive-days').value;
+  panel.style.display = 'block';
+  body.innerHTML = '<div style="color:var(--muted);">Calcul en cours…</div>';
+  const r = await fetch(`/api/config/thresholds/adaptive?days=${days}`);
+  const d = await r.json();
+  const sensors = ['temperature', 'turbidity', 'ph'];
+  const icons   = { temperature: '🌡', turbidity: '💧', ph: '⚗' };
+  body.innerHTML = sensors.map(s => {
+    const info = d[s];
+    if (info.error) return `<div style="margin-bottom:1rem;"><b>${icons[s]} ${s}</b> — <span style="color:var(--muted);">${info.error}</span></div>`;
+    const sg = info.suggested;
+    return `
+    <div style="margin-bottom:1.5rem;">
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.5rem;">
+        <b style="font-size:.95rem;">${icons[s]} ${s}</b>
+        <span style="font-size:.78rem;color:var(--muted);">${info.readings} lectures · moy ${info.mean} · σ ${info.stdev}</span>
+        <button class="btn btn-primary btn-sm" onclick="applyAdaptive('${s}',${days})">✅ Appliquer</button>
+      </div>
+      <table style="font-size:.82rem;border-collapse:collapse;width:100%;max-width:420px;">
+        ${['normal','warning','critical'].map(z => `
+        <tr>
+          <td style="padding:.3rem .6rem;font-weight:600;color:var(--${z=='normal'?'success':z});">${z}</td>
+          <td style="padding:.3rem .6rem;">min ${sg[z].min}</td>
+          <td style="padding:.3rem .6rem;">max ${sg[z].max}</td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }).join('');
+}
+
+async function applyAdaptive(sensor, days) {
+  if (!confirm(`Appliquer les seuils adaptatifs pour ${sensor} (${days}j) ?`)) return;
+  const r = await fetch(`/api/config/thresholds/apply-adaptive?sensor=${sensor}&days=${days}`, { method: 'POST' });
+  if (r.ok) { showToast(`Seuils adaptatifs appliqués pour ${sensor}`, 'success'); setTimeout(() => location.reload(), 900); }
+  else { const d = await r.json().catch(()=>({})); showToast(d.detail || 'Erreur', 'error'); }
+}
+
 // ── Fenêtres de maintenance ────────────────────────────────────
 async function addMaintenanceWindow() {
   const sensor = document.getElementById('mw-sensor').value;
@@ -412,6 +545,137 @@ async function deleteMW(id) {
     showToast('Erreur lors de la suppression', 'error');
   }
 }
+
+// ── Rapport automatique ─────────────────────────────────────────
+(async () => {
+  const cfg = await fetch('/api/config/report-schedule').then(r => r.json()).catch(() => ({}));
+  document.getElementById('rs-freq').value   = cfg.frequency   || 'daily';
+  document.getElementById('rs-hour').value   = cfg.hour        ?? 8;
+  document.getElementById('rs-days').value   = cfg.days_period || 1;
+  document.getElementById('rs-active').checked = cfg.active    || false;
+})();
+
+async function saveReportSchedule() {
+  const params = new URLSearchParams({
+    active:      document.getElementById('rs-active').checked,
+    frequency:   document.getElementById('rs-freq').value,
+    hour:        document.getElementById('rs-hour').value,
+    days_period: document.getElementById('rs-days').value,
+  });
+  const r = await fetch('/api/config/report-schedule?' + params.toString(), { method: 'POST' });
+  showToast(r.ok ? 'Rapport programmé enregistré' : 'Erreur', r.ok ? 'success' : 'error');
+}
+
+// ── Zones géographiques ────────────────────────────────────────
+const _SENSOR_ICONS = { temperature: '🌡', turbidity: '💧', ph: '⚗' };
+
+async function loadZones() {
+  const r = await fetch('/api/config/zones').catch(() => null);
+  if (!r || !r.ok) return;
+  const zones = await r.json();
+  const grid  = document.getElementById('zones-grid');
+  grid.innerHTML = Object.entries(zones).map(([sensor, z]) => `
+  <div class="threshold-card" id="zone-card-${sensor}">
+    <h4>${_SENSOR_ICONS[sensor] || '📡'} ${sensor}</h4>
+    <div style="display:grid;gap:.5rem;">
+      <div>
+        <label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Nom de zone</label>
+        <input type="text" id="z-zone-${sensor}" value="${z.zone || ''}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Label affiché</label>
+        <input type="text" id="z-label-${sensor}" value="${z.label || sensor}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
+        <div>
+          <label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Latitude</label>
+          <input type="number" step="0.0001" id="z-lat-${sensor}" value="${z.lat || 0}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Longitude</label>
+          <input type="number" step="0.0001" id="z-lon-${sensor}" value="${z.lon || 0}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveZone('${sensor}')">💾 Enregistrer</button>
+    </div>
+  </div>`).join('');
+}
+
+async function saveZone(sensor) {
+  const zone  = document.getElementById(`z-zone-${sensor}`).value.trim();
+  const label = document.getElementById(`z-label-${sensor}`).value.trim();
+  const lat   = parseFloat(document.getElementById(`z-lat-${sensor}`).value);
+  const lon   = parseFloat(document.getElementById(`z-lon-${sensor}`).value);
+  const params = new URLSearchParams({ zone, label, lat, lon });
+  const r = await fetch(`/api/config/zones/${sensor}?${params.toString()}`, { method: 'POST' });
+  const st = document.getElementById('zones-status');
+  if (r.ok) {
+    showToast(`Zone ${sensor} enregistrée`, 'success');
+    st.textContent = `✓ Zone ${sensor} sauvegardée`;
+    setTimeout(() => st.textContent = '', 3000);
+  } else {
+    showToast('Erreur enregistrement zone', 'error');
+  }
+}
+
+(async () => { await loadZones(); })();
+
+// ── Gestion des utilisateurs ───────────────────────────────────
+async function loadUsers() {
+  const r = await fetch('/api/config/auth/users').catch(() => null);
+  if (!r || !r.ok) { document.getElementById('users-list').innerHTML = '<div style="color:var(--muted);font-size:.85rem;">Non disponible (authentification désactivée ou droits insuffisants).</div>'; return; }
+  const d = await r.json();
+  const users = d.users || {};
+  const entries = Object.entries(users);
+  if (!entries.length) {
+    document.getElementById('users-list').innerHTML = '<div style="color:var(--muted);font-size:.85rem;">Aucun utilisateur secondaire. Seul l\'admin principal existe.</div>';
+    return;
+  }
+  const roleColors = { admin: 'var(--critical)', operator: 'var(--warning)', viewer: 'var(--success)' };
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:.88rem;"><thead><tr style="border-bottom:2px solid var(--border);">';
+  html += '<th style="text-align:left;padding:.4rem .6rem;">Utilisateur</th><th style="padding:.4rem .6rem;">Rôle</th><th></th></tr></thead><tbody>';
+  entries.forEach(([u, info]) => {
+    const color = roleColors[info.role] || 'var(--text)';
+    html += `<tr id="user-row-${u}" style="border-bottom:1px solid var(--border);">
+      <td style="padding:.4rem .6rem;">${u}</td>
+      <td style="padding:.4rem .6rem;"><span style="font-weight:600;color:${color};">${info.role}</span></td>
+      <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteUser('${u}')">🗑</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('users-list').innerHTML = html;
+}
+
+async function addUser() {
+  const u = document.getElementById('nu-user').value.trim();
+  const p = document.getElementById('nu-pass').value;
+  const r = document.getElementById('nu-role').value;
+  if (!u || !p) { showToast('Nom d\'utilisateur et mot de passe requis', 'warning'); return; }
+  const params = new URLSearchParams({ username: u, password: p, role: r });
+  const res = await fetch('/api/config/auth/users?' + params.toString(), { method: 'POST' });
+  if (res.ok) {
+    showToast(`Utilisateur "${u}" créé avec le rôle ${r}`, 'success');
+    document.getElementById('nu-user').value = '';
+    document.getElementById('nu-pass').value = '';
+    loadUsers();
+  } else {
+    const d = await res.json().catch(() => ({}));
+    showToast(d.detail || 'Erreur lors de la création', 'error');
+  }
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Supprimer l'utilisateur "${username}" ?`)) return;
+  const res = await fetch(`/api/config/auth/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+  if (res.ok) {
+    document.getElementById('user-row-' + username)?.remove();
+    showToast(`Utilisateur "${username}" supprimé`, 'info');
+  } else {
+    showToast('Erreur lors de la suppression', 'error');
+  }
+}
+
+(async () => { await loadUsers(); })();
 
 // ── Email SMTP ─────────────────────────────────────────────────
 (async () => {

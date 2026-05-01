@@ -74,6 +74,18 @@ class SimulatorScheduler:
                 seconds=60,
                 id="escalation_check",
             )
+            self._scheduler.add_job(
+                self._check_storm,
+                trigger="interval",
+                seconds=30,
+                id="storm_check",
+            )
+            self._scheduler.add_job(
+                self._send_scheduled_report,
+                trigger="interval",
+                minutes=60,
+                id="scheduled_report",
+            )
         self._scheduler.start()
         self._running = True
         logger.info(f"Simulateur démarré — intervalle : {self.interval_seconds}s")
@@ -123,6 +135,27 @@ class SimulatorScheduler:
             logger.error(f"Erreur vérification escalade : {e}")
         finally:
             db.close()
+
+    def _check_storm(self):
+        if not self._db_factory:
+            return
+        db = self._db_factory()
+        try:
+            from ..alerts.service import AlertService
+            AlertService.check_storm_alert(db, threshold=5, window_minutes=2)
+        except Exception as e:
+            logger.error(f"Erreur vérification tempête : {e}")
+        finally:
+            db.close()
+
+    def _send_scheduled_report(self):
+        if not self._db_factory:
+            return
+        try:
+            from ..alerts.report_scheduler import send_scheduled_report
+            send_scheduled_report(self._db_factory)
+        except Exception as e:
+            logger.error(f"Erreur rapport programmé : {e}")
 
     @staticmethod
     def _default_callback(readings: list[SensorReading]):

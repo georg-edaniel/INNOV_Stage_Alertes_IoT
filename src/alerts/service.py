@@ -380,6 +380,46 @@ class AlertService:
                             pass
 
     @staticmethod
+    def check_storm_alert(db: Session, threshold: int = 5, window_minutes: int = 2):
+        """
+        Crée une alerte CRITICAL 'tempête' si >= threshold alertes
+        ont été créées en moins de window_minutes minutes.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        count  = db.query(Alert).filter(
+            Alert.created_at >= cutoff,
+            Alert.level.in_(["WARNING", "CRITICAL"]),
+            Alert.method != "storm",
+        ).count()
+
+        if count >= threshold:
+            # Éviter de créer une storm alert en doublon
+            existing = db.query(Alert).filter(
+                Alert.method   == "storm",
+                Alert.resolved == False,  # noqa
+                Alert.created_at >= cutoff,
+            ).first()
+            if not existing:
+                storm = Alert(
+                    sensor="système", value=float(count), unit="alertes",
+                    level="CRITICAL", method="storm",
+                    reason=f"Tempête d'alertes : {count} anomalies détectées en {window_minutes} minutes",
+                )
+                db.add(storm)
+                db.commit()
+                db.refresh(storm)
+                try:
+                    from .notifier import notify as webhook_notify
+                    webhook_notify(storm.to_dict())
+                except Exception:
+                    pass
+                try:
+                    from .email_notifier import notify as email_notify
+                    email_notify(storm.to_dict())
+                except Exception:
+                    pass
+
+    @staticmethod
     def check_escalation(db: Session, escalation_minutes: int = 10):
         """Re-notifie si une alerte CRITICAL n'est pas acquittée depuis N minutes."""
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=escalation_minutes)
@@ -518,11 +558,35 @@ class AlertService:
         self.db.refresh(restored)
         return restored
 
-    def get_archived(self, limit: int = 50, offset: int = 0) -> list[ArchivedAlert]:
-        return self.db.query(ArchivedAlert).order_by(desc(ArchivedAlert.archived_at)).offset(offset).limit(limit).all()
+    def get_archived(
+        self,
+        sensor:    str | None      = None,
+        level:     str | None      = None,
+        date_from: datetime | None = None,
+        date_to:   datetime | None = None,
+        limit:  int = 50,
+        offset: int = 0,
+    ) -> list[ArchivedAlert]:
+        q = self.db.query(ArchivedAlert)
+        if sensor:    q = q.filter(ArchivedAlert.sensor == sensor)
+        if level:     q = q.filter(ArchivedAlert.level  == level.upper())
+        if date_from: q = q.filter(ArchivedAlert.archived_at >= date_from)
+        if date_to:   q = q.filter(ArchivedAlert.archived_at <= date_to)
+        return q.order_by(desc(ArchivedAlert.archived_at)).offset(offset).limit(limit).all()
 
-    def count_archived(self) -> int:
-        return self.db.query(ArchivedAlert).count()
+    def count_archived(
+        self,
+        sensor:    str | None      = None,
+        level:     str | None      = None,
+        date_from: datetime | None = None,
+        date_to:   datetime | None = None,
+    ) -> int:
+        q = self.db.query(ArchivedAlert)
+        if sensor:    q = q.filter(ArchivedAlert.sensor == sensor)
+        if level:     q = q.filter(ArchivedAlert.level  == level.upper())
+        if date_from: q = q.filter(ArchivedAlert.archived_at >= date_from)
+        if date_to:   q = q.filter(ArchivedAlert.archived_at <= date_to)
+        return q.count()
 
     # ------------------------------------------------------------------
     # Interne
@@ -810,6 +874,39 @@ class AlertService:
                 "anomaly_rate":_delta(current["anomaly_rate"],previous["anomaly_rate"]),
             }
         }
+
+    def compute_adaptive_thresholds(self, days: int = 7) -> dict:
+        """
+        Calcule des seuils adaptatifs basés sur la distribution des lectures des N derniers jours.
+        Retourne des suggestions (non appliquées automatiquement).
+        WARNING  = moyenne ± 2 écarts-types
+        CRITICAL = moyenne ± 3 écarts-types
+        """
+        import statistics
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        result = {}
+        for sensor in ["temperature", "turbidity", "ph"]:
+            logs = self.db.query(SensorLog).filter(
+                SensorLog.sensor == sensor,
+                SensorLog.created_at >= cutoff,
+            ).all()
+            if len(logs) < 10:
+                result[sensor] = {"error": "Pas assez de données (min. 10 lectures)"}
+                continue
+            vals  = [l.value for l in logs]
+            mean  = statistics.mean(vals)
+            stdev = statistics.stdev(vals)
+            result[sensor] = {
+                "readings": len(vals),
+                "mean":     round(mean, 3),
+                "stdev":    round(stdev, 3),
+                "suggested": {
+                    "normal":   {"min": round(mean - stdev,     2), "max": round(mean + stdev,     2)},
+                    "warning":  {"min": round(mean - 2 * stdev, 2), "max": round(mean + 2 * stdev, 2)},
+                    "critical": {"min": round(mean - 3 * stdev, 2), "max": round(mean + 3 * stdev, 2)},
+                },
+            }
+        return result
 
     def _auto_resolve(self, sensor: str):
         """Résout automatiquement les alertes ouvertes quand le capteur revient à la normale."""

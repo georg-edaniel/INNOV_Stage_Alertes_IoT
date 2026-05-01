@@ -8,6 +8,41 @@
   <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} archivée(s)</span>
 </h1>
 
+<!-- Filtres -->
+<form method="get" action="/archived">
+  <div class="filters" style="margin-bottom:1rem;">
+    <div class="filter-group">
+      <label>Capteur</label>
+      <select name="sensor" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+        <option value="">Tous</option>
+        <option value="temperature" {% if filters.sensor=='temperature' %}selected{% endif %}>Température</option>
+        <option value="turbidity"   {% if filters.sensor=='turbidity'   %}selected{% endif %}>Turbidité</option>
+        <option value="ph"          {% if filters.sensor=='ph'          %}selected{% endif %}>pH</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Niveau</label>
+      <select name="level" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+        <option value="">Tous</option>
+        <option value="WARNING"  {% if filters.level=='WARNING'  %}selected{% endif %}>Warning</option>
+        <option value="CRITICAL" {% if filters.level=='CRITICAL' %}selected{% endif %}>Critical</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Archivée depuis</label>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group">
+      <label>Jusqu'au</label>
+      <input type="date" name="date_to" value="{{ filters.date_to }}" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.9rem;">
+    </div>
+    <div class="filter-group" style="align-self:flex-end;">
+      <button type="submit" class="btn btn-primary">Filtrer</button>
+      <a href="/archived" class="btn btn-outline">Reset</a>
+    </div>
+  </div>
+</form>
+
 <div class="card">
   <div class="card-body" style="padding:0;">
     {% if alerts %}

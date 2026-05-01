@@ -211,14 +211,25 @@ def audit_page(
 
 
 @dashboard_router.get("/archived", response_class=HTMLResponse)
-def archived_page(request: Request, page: int = 1, db: Session = Depends(get_db)):
-    """Page des alertes archivées."""
+def archived_page(
+    request:   Request,
+    sensor:    str | None = None,
+    level:     str | None = None,
+    date_from: str | None = None,
+    date_to:   str | None = None,
+    page:      int = 1,
+    db: Session = Depends(get_db),
+):
+    """Page des alertes archivées avec filtres."""
+    from datetime import datetime, timezone, timedelta
     PER = 20
     svc    = AlertService(db)
     page   = max(1, page)
     offset = (page - 1) * PER
-    alerts = svc.get_archived(limit=PER, offset=offset)
-    total  = svc.count_archived()
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+    alerts = svc.get_archived(sensor=sensor or None, level=level or None, date_from=df, date_to=dt, limit=PER, offset=offset)
+    total  = svc.count_archived(sensor=sensor or None, level=level or None, date_from=df, date_to=dt)
     total_pages = max(1, (total + PER - 1) // PER)
     return templates.TemplateResponse(request, "archived.html", {
         "alerts":      [a.to_dict() for a in alerts],
@@ -227,6 +238,33 @@ def archived_page(request: Request, page: int = 1, db: Session = Depends(get_db)
         "total":       total,
         "has_prev":    page > 1,
         "has_next":    page < total_pages,
+        "filters":     {"sensor": sensor or "", "level": level or "", "date_from": date_from or "", "date_to": date_to or ""},
+    })
+
+
+@dashboard_router.get("/map", response_class=HTMLResponse)
+def map_page(request: Request, db: Session = Depends(get_db)):
+    """Carte géographique des capteurs avec état en temps réel."""
+    from ..alerts.zones_config import load_zones
+    svc    = AlertService(db)
+    health = svc.get_sensor_health()
+    zones  = load_zones()
+    # Fusionner health + zones pour le template
+    sensors = []
+    for sensor, zone_info in zones.items():
+        h = health.get(sensor, {})
+        sensors.append({
+            "sensor": sensor,
+            "label":  zone_info.get("label", sensor),
+            "zone":   zone_info.get("zone", ""),
+            "lat":    zone_info.get("lat", 0.0),
+            "lon":    zone_info.get("lon", 0.0),
+            "level":  h.get("level", "unknown"),
+            "value":  h.get("value"),
+            "unit":   h.get("unit", ""),
+        })
+    return templates.TemplateResponse(request, "map.html", {
+        "sensors": sensors,
     })
 
 

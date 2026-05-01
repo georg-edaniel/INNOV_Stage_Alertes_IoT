@@ -373,6 +373,20 @@ loadComments();
     </li>`).join('') + '</ul>';
 })();
 
+// ── Raccourcis clavier page détail ────────────────────────────
+document.addEventListener('keydown', e => {
+  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  if (e.key === 'a' || e.key === 'A') {
+    {% if not alert.resolved and not alert.acknowledged %}openAckModal();{% endif %}
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    {% if not alert.resolved %}resolve();{% endif %}
+  }
+  if (e.key === 'Delete') {
+    deleteAlert();
+  }
+});
+
 async function deleteAlert() {
   if (!confirm('Supprimer définitivement cette alerte ? Cette action est irréversible.')) return;
   const r = await fetch(`/api/alerts/{{ alert.id }}`, { method: 'DELETE' });

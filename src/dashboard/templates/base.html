@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}IoT Alert System{% endblock %} — INNOV/CCNB</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#1a5c9c">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="IoT Alertes">
 </head>
 <body>
 <div class="layout">
@@ -33,6 +38,7 @@
     <a href="/audit"       class="nav-item {% if active=='audit'       %}active{% endif %}">🛡 Audit</a>
     <a href="/archived"    class="nav-item {% if active=='archived'    %}active{% endif %}">📦 Archives</a>
     <a href="/presentation" class="nav-item" target="_blank">🖥 Présentation</a>
+    <a href="/map"          class="nav-item {% if active=='map'         %}active{% endif %}">🗺 Carte</a>
 
     <div class="nav-section">API</div>
     <a href="/docs" class="nav-item" target="_blank">📖 Swagger UI</a>
@@ -88,6 +94,11 @@ function showToast(message, type = 'info', duration = 3500) {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 250);
   }, duration);
+}
+
+// ── PWA Service Worker ─────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
 }
 
 // ── Dark mode ──────────────────────────────────────────────────
@@ -200,6 +211,26 @@ function updateTimerDisplay() {
 
 initLastAlertTimer();
 setInterval(updateTimerDisplay, 1000);
+
+// ── Titre onglet dynamique (badge CRITICAL) ────────────────────
+const _baseTitle = document.title;
+async function updateTabTitle() {
+  try {
+    const r = await fetch('/api/alerts/open');
+    const d = await r.json();
+    const c = d.critical || 0;
+    document.title = c > 0 ? `🔴 (${c}) ${_baseTitle}` : _baseTitle;
+    // Mettre à jour le favicon si possible
+    const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+    link.type = 'image/x-icon';
+    link.rel  = 'shortcut icon';
+    link.href = c > 0 ? 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔴</text></svg>'
+                      : '/static/favicon.ico';
+    document.head.appendChild(link);
+  } catch(_) {}
+}
+updateTabTitle();
+setInterval(updateTabTitle, 15000);
 
 // ── Recherche globale ───────────────────────────────────────────
 let _searchTimer = null;
