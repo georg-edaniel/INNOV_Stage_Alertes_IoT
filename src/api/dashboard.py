@@ -242,6 +242,18 @@ def archived_page(
     })
 
 
+@dashboard_router.get("/params", response_class=HTMLResponse)
+def params_page(request: Request, db: Session = Depends(get_db)):
+    """Page paramètres unifiée — seuils, notifications, sécurité, capteurs."""
+    from ..alerts.threshold_config import get_all
+    svc     = AlertService(db)
+    windows = svc.get_maintenance_windows()
+    return templates.TemplateResponse(request, "params.html", {
+        "thresholds":          get_all(),
+        "maintenance_windows": [w.to_dict() for w in windows],
+    })
+
+
 @dashboard_router.get("/map", response_class=HTMLResponse)
 def map_page(request: Request, db: Session = Depends(get_db)):
     """Carte géographique des capteurs avec état en temps réel."""

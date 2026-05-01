@@ -1,0 +1,643 @@
+{% extends "base.html" %}
+{% set active = "params" %}
+{% block title %}Paramètres{% endblock %}
+
+{% block content %}
+<h1 class="page-title">⚙️ Paramètres</h1>
+
+<!-- Onglets -->
+<div class="tab-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1.5rem;flex-wrap:wrap;">
+  {% for tid, icon, label in [
+      ('seuils',       '🌡', 'Seuils'),
+      ('notifications','🔔', 'Notifications'),
+      ('rapports',     '📅', 'Rapports'),
+      ('securite',     '🔐', 'Sécurité'),
+      ('capteurs',     '🗺', 'Capteurs'),
+  ] %}
+  <button id="tab-btn-{{ tid }}" onclick="showTab('{{ tid }}')"
+    style="padding:.65rem 1.3rem;border:none;background:none;cursor:pointer;font-size:.9rem;
+           border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);
+           transition:color .15s,border-color .15s;white-space:nowrap;">
+    {{ icon }} {{ label }}
+  </button>
+  {% endfor %}
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ONGLET 1 — SEUILS
+     ═══════════════════════════════════════════════════════ -->
+<div id="tab-seuils" class="tab-pane">
+
+  <div class="info-box" style="margin-bottom:1rem;">
+    Modifications appliquées immédiatement — persistées dans <code>thresholds_override.json</code>.
+  </div>
+
+  <div class="threshold-grid">
+    {% for sensor, label, icon in [('temperature','Température','🌡'),('turbidity','Turbidité','💧'),('ph','pH','⚗')] %}
+    {% set cfg = thresholds[sensor] %}
+    <div class="threshold-card">
+      <h4>{{ icon }} {{ label }} ({{ cfg.unit }})</h4>
+      {% for zone, zlabel, color in [('normal','Normal','var(--success)'),('warning','Warning','var(--warning)'),('critical','Critical','var(--critical)')] %}
+      <div style="margin-bottom:.8rem;">
+        <div style="font-size:.8rem;font-weight:600;color:{{ color }};margin-bottom:.4rem;text-transform:uppercase;">{{ zlabel }}</div>
+        <div class="threshold-row">
+          <label>Min</label>
+          <input type="number" step="0.1" id="{{ sensor }}-{{ zone }}-min" value="{{ cfg[zone].min }}" oninput="markDirty('{{ sensor }}')">
+          <label>Max</label>
+          <input type="number" step="0.1" id="{{ sensor }}-{{ zone }}-max" value="{{ cfg[zone].max }}" oninput="markDirty('{{ sensor }}')">
+        </div>
+      </div>
+      {% endfor %}
+      <div style="display:flex;gap:.5rem;margin-top:.5rem;">
+        <button class="btn btn-primary btn-sm" onclick="saveThresholds('{{ sensor }}')">💾 Enregistrer</button>
+        <span id="status-{{ sensor }}" style="font-size:.78rem;color:var(--muted);align-self:center;"></span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div style="margin-top:1rem;display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;">
+    <button class="btn btn-danger btn-sm" onclick="resetAll()">🔄 Réinitialiser par défaut</button>
+    <button class="btn btn-outline btn-sm" onclick="showAdaptive()">🧠 Seuils adaptatifs</button>
+    <select id="adaptive-days" style="padding:.35rem .6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem;">
+      <option value="7">7 jours</option><option value="14">14 jours</option><option value="30">30 jours</option>
+    </select>
+  </div>
+
+  <div id="adaptive-panel" style="display:none;margin-top:1rem;">
+    <div class="card"><div class="card-header"><h3>🧠 Seuils adaptatifs suggérés</h3></div>
+      <div class="card-body" style="padding:1.2rem;" id="adaptive-body"><div style="color:var(--muted);">Chargement…</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1.5rem;">
+    <div class="card-header"><h3>📜 Historique des modifications</h3></div>
+    <div class="card-body" style="padding:0;"><div id="history-container"><div style="padding:1rem;color:var(--muted);font-size:.88rem;">Chargement…</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ONGLET 2 — NOTIFICATIONS
+     ═══════════════════════════════════════════════════════ -->
+<div id="tab-notifications" class="tab-pane">
+
+  <!-- Webhook -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-header"><h3>🔗 Webhook (Slack / Discord / Générique)</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Envoi automatique lors de chaque alerte CRITICAL.</p>
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:.8rem;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">URL du webhook</label>
+          <input type="url" id="wh-url" placeholder="https://hooks.slack.com/…" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Format</label>
+          <select id="wh-format" style="padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+            <option value="generic">Générique</option><option value="slack">Slack</option><option value="discord">Discord</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Actif</label>
+          <input type="checkbox" id="wh-active" style="width:20px;height:20px;cursor:pointer;">
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="saveWebhook()">💾 Enregistrer</button></div>
+      </div>
+      <div id="wh-status" style="font-size:.8rem;margin-top:.6rem;color:var(--muted);"></div>
+    </div>
+  </div>
+
+  <!-- Email SMTP -->
+  <div class="card">
+    <div class="card-header"><h3>📧 Email SMTP</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Envoi lors de chaque alerte CRITICAL. Compatible Gmail (App Password), Outlook, tout SMTP.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Serveur SMTP</label>
+          <input type="text" id="em-host" placeholder="smtp.gmail.com" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Port</label>
+          <input type="number" id="em-port" value="587" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Email expéditeur</label>
+          <input type="text" id="em-user" placeholder="alerts@example.com" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe (App Password)</label>
+          <input type="password" id="em-pass" placeholder="••••••••" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Adresse expéditeur (optionnel)</label>
+          <input type="text" id="em-from" placeholder="IoT Alertes &lt;alerts@example.com&gt;" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Destinataire</label>
+          <input type="email" id="em-to" placeholder="admin@example.com" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+          <input type="checkbox" id="em-active"> Activer les notifications email
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="saveEmail()">💾 Enregistrer</button>
+        <span id="em-status" style="font-size:.8rem;color:var(--muted);"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ONGLET 3 — RAPPORTS
+     ═══════════════════════════════════════════════════════ -->
+<div id="tab-rapports" class="tab-pane">
+  <div class="card">
+    <div class="card-header"><h3>📅 Rapport automatique par email</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+        Envoie le rapport d'activité par email selon la fréquence choisie.<br>
+        <b>Prérequis :</b> configurer l'onglet Email SMTP.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.8rem;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Fréquence</label>
+          <select id="rs-freq" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+            <option value="daily">Quotidien</option>
+            <option value="weekly">Hebdomadaire (lundi)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Heure d'envoi (UTC)</label>
+          <input type="number" id="rs-hour" value="8" min="0" max="23" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Période du rapport</label>
+          <select id="rs-days" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+            <option value="1">24 heures</option><option value="7">7 jours</option><option value="30">30 jours</option>
+          </select>
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="saveReportSchedule()">💾 Enregistrer</button></div>
+      </div>
+      <div style="margin-top:.8rem;display:flex;align-items:center;gap:.6rem;">
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+          <input type="checkbox" id="rs-active"> Activer le rapport automatique
+        </label>
+        <span id="rs-status" style="font-size:.8rem;color:var(--muted);"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ONGLET 4 — SÉCURITÉ
+     ═══════════════════════════════════════════════════════ -->
+<div id="tab-securite" class="tab-pane">
+
+  <!-- Auth principale -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-header"><h3>🔐 Authentification</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">Protège l'accès au dashboard. Désactivé par défaut.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur (admin)</label>
+          <input type="text" id="auth-user" placeholder="admin" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nouveau mot de passe</label>
+          <input type="password" id="auth-pass" placeholder="Laisser vide pour ne pas changer" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+          <input type="checkbox" id="auth-enabled"> Activer la protection par mot de passe
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="saveAuth()">💾 Enregistrer</button>
+        <span id="auth-status" style="font-size:.8rem;color:var(--muted);"></span>
+      </div>
+      <div style="margin-top:.8rem;padding:.6rem .9rem;background:var(--bg-alt,rgba(0,0,0,.03));border-radius:6px;font-size:.8rem;color:var(--muted);">
+        <b>Identifiants par défaut :</b> admin / admin — Changez-les avant d'activer.
+      </div>
+    </div>
+  </div>
+
+  <!-- Gestion utilisateurs -->
+  <div class="card">
+    <div class="card-header"><h3>👥 Gestion des utilisateurs</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+        Rôles : <b>admin</b> (tout), <b>operator</b> (acquitter / résoudre / noter), <b>viewer</b> (lecture seule).
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:.7rem;align-items:flex-end;margin-bottom:1rem;flex-wrap:wrap;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Nom d'utilisateur</label>
+          <input type="text" id="nu-user" placeholder="ex: operateur1" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe</label>
+          <input type="password" id="nu-pass" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Rôle</label>
+          <select id="nu-role" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+            <option value="viewer">viewer (lecture)</option>
+            <option value="operator" selected>operator</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="addUser()">➕ Ajouter</button></div>
+      </div>
+      <div id="users-list"><div style="color:var(--muted);font-size:.85rem;">Chargement…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ONGLET 5 — CAPTEURS
+     ═══════════════════════════════════════════════════════ -->
+<div id="tab-capteurs" class="tab-pane">
+
+  <!-- Zones géographiques -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-header"><h3>🗺 Zones géographiques</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+        Coordonnées GPS et zone affectées à chaque capteur pour la <a href="/map" style="color:var(--primary);">carte interactive</a>.
+      </p>
+      <div id="zones-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;"></div>
+      <div id="zones-status" style="font-size:.8rem;margin-top:.6rem;color:var(--muted);"></div>
+    </div>
+  </div>
+
+  <!-- Fenêtres de maintenance -->
+  <div class="card">
+    <div class="card-header"><h3>🔧 Fenêtres de maintenance</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+        Pendant une fenêtre de maintenance, les alertes du capteur ciblé sont supprimées.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:.7rem;align-items:flex-end;margin-bottom:1rem;flex-wrap:wrap;">
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Capteur</label>
+          <select id="mw-sensor" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+            <option value="">Tous les capteurs</option>
+            <option value="temperature">🌡 Température</option>
+            <option value="turbidity">💧 Turbidité</option>
+            <option value="ph">⚗ pH</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Début</label>
+          <input type="datetime-local" id="mw-start" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Fin</label>
+          <input type="datetime-local" id="mw-end" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div>
+          <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Raison</label>
+          <input type="text" id="mw-reason" placeholder="Intervention…" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="addMW()">➕ Ajouter</button></div>
+      </div>
+      <div id="mw-list">
+        {% if maintenance_windows %}
+        <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+          <thead><tr style="border-bottom:2px solid var(--border);">
+            <th style="text-align:left;padding:.4rem .6rem;">Capteur</th>
+            <th style="padding:.4rem .6rem;">Début</th>
+            <th style="padding:.4rem .6rem;">Fin</th>
+            <th style="text-align:left;padding:.4rem .6rem;">Raison</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+          {% for w in maintenance_windows %}
+          <tr id="mw-row-{{ w.id }}" style="border-bottom:1px solid var(--border);">
+            <td style="padding:.4rem .6rem;">{{ w.sensor or '🌐 Tous' }}</td>
+            <td style="padding:.4rem .6rem;white-space:nowrap;color:var(--muted);font-size:.8rem;">{{ w.start_dt[:16].replace('T',' ') }}</td>
+            <td style="padding:.4rem .6rem;white-space:nowrap;color:var(--muted);font-size:.8rem;">{{ w.end_dt[:16].replace('T',' ') }}</td>
+            <td style="padding:.4rem .6rem;">{{ w.reason or '—' }}</td>
+            <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteMW({{ w.id }})">🗑</button></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div style="color:var(--muted);font-size:.88rem;">Aucune fenêtre configurée.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Onglets ─────────────────────────────────────────────────────
+function showTab(id) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('[id^="tab-btn-"]').forEach(b => {
+    b.style.color = 'var(--muted)';
+    b.style.borderBottomColor = 'transparent';
+    b.style.fontWeight = 'normal';
+  });
+  document.getElementById('tab-' + id).style.display = 'block';
+  const btn = document.getElementById('tab-btn-' + id);
+  btn.style.color = 'var(--primary,#1a5c9c)';
+  btn.style.borderBottomColor = 'var(--primary,#1a5c9c)';
+  btn.style.fontWeight = '600';
+  localStorage.setItem('params_tab', id);
+}
+
+// Restaurer l'onglet actif (ou seuils par défaut)
+const _savedTab = localStorage.getItem('params_tab') || 'seuils';
+showTab(_savedTab);
+
+// ── Seuils ──────────────────────────────────────────────────────
+const dirty = {};
+function markDirty(sensor) {
+  dirty[sensor] = true;
+  const s = document.getElementById('status-' + sensor);
+  if (s) { s.textContent = '● Modifié'; s.style.color = 'var(--warning)'; }
+}
+
+async function saveThresholds(sensor) {
+  const zones = ['normal','warning','critical'];
+  const st = document.getElementById('status-' + sensor);
+  st.textContent = 'Sauvegarde...';
+  let ok = true;
+  for (const zone of zones) {
+    const minV = parseFloat(document.getElementById(`${sensor}-${zone}-min`).value);
+    const maxV = parseFloat(document.getElementById(`${sensor}-${zone}-max`).value);
+    if (minV >= maxV) { st.textContent = `min >= max pour ${zone}`; st.style.color='var(--critical)'; ok=false; break; }
+    const r = await fetch(`/api/config/thresholds?sensor=${sensor}&zone=${zone}&min=${minV}&max=${maxV}`, {method:'POST'});
+    if (!r.ok) { ok=false; break; }
+  }
+  if (ok) {
+    st.textContent='✓ Enregistré'; st.style.color='var(--success)';
+    delete dirty[sensor]; setTimeout(()=>st.textContent='',3000);
+    showToast(`Seuils ${sensor} enregistrés`,'success');
+  } else { showToast('Erreur enregistrement','error'); }
+}
+
+async function resetAll() {
+  if (!confirm('Réinitialiser tous les seuils ?')) return;
+  await fetch('/api/config/thresholds/reset',{method:'POST'});
+  showToast('Seuils réinitialisés','info');
+  setTimeout(()=>location.reload(),700);
+}
+
+window.addEventListener('beforeunload', e => { if(Object.keys(dirty).length>0){e.preventDefault();e.returnValue='';} });
+
+async function showAdaptive() {
+  const panel = document.getElementById('adaptive-panel');
+  const body  = document.getElementById('adaptive-body');
+  const days  = document.getElementById('adaptive-days').value;
+  panel.style.display='block'; body.innerHTML='<div style="color:var(--muted);">Calcul…</div>';
+  const d = await fetch(`/api/config/thresholds/adaptive?days=${days}`).then(r=>r.json());
+  const icons = {temperature:'🌡',turbidity:'💧',ph:'⚗'};
+  body.innerHTML = ['temperature','turbidity','ph'].map(s=>{
+    const info=d[s];
+    if(info.error) return `<div><b>${icons[s]} ${s}</b> — <span style="color:var(--muted);">${info.error}</span></div>`;
+    const sg=info.suggested;
+    return `<div style="margin-bottom:1.2rem;">
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.4rem;">
+        <b>${icons[s]} ${s}</b>
+        <span style="font-size:.78rem;color:var(--muted);">${info.readings} lectures · moy ${info.mean} · σ ${info.stdev}</span>
+        <button class="btn btn-primary btn-sm" onclick="applyAdaptive('${s}',${days})">✅ Appliquer</button>
+      </div>
+      <table style="font-size:.82rem;border-collapse:collapse;">
+        ${['normal','warning','critical'].map(z=>`<tr><td style="padding:.25rem .6rem;font-weight:600;color:var(--${z=='normal'?'success':z});">${z}</td><td style="padding:.25rem .6rem;">min ${sg[z].min}</td><td style="padding:.25rem .6rem;">max ${sg[z].max}</td></tr>`).join('')}
+      </table></div>`;
+  }).join('');
+}
+
+async function applyAdaptive(sensor,days) {
+  if (!confirm(`Appliquer seuils adaptatifs pour ${sensor} (${days}j) ?`)) return;
+  const r = await fetch(`/api/config/thresholds/apply-adaptive?sensor=${sensor}&days=${days}`,{method:'POST'});
+  if (r.ok) { showToast(`Seuils adaptatifs appliqués pour ${sensor}`,'success'); setTimeout(()=>location.reload(),900); }
+  else { const d=await r.json().catch(()=>({})); showToast(d.detail||'Erreur','error'); }
+}
+
+// Historique seuils
+(async()=>{
+  const d = await fetch('/api/config/thresholds/history?limit=20').then(r=>r.json());
+  const con = document.getElementById('history-container');
+  if(!d.history.length){con.innerHTML='<div style="padding:1rem;color:var(--muted);font-size:.88rem;">Aucune modification.</div>';return;}
+  let html='<table style="width:100%;font-size:.82rem;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid var(--border);">';
+  ['Horodatage','Capteur','Zone','Avant','Après'].forEach(h=>html+=`<th style="padding:.5rem .8rem;text-align:left;">${h}</th>`);
+  html+='</tr></thead><tbody>';
+  d.history.forEach((e,i)=>{
+    const bg=i%2===0?'var(--bg)':'var(--bg-alt,rgba(0,0,0,.02))';
+    const ts=e.timestamp.replace('T',' ').slice(0,19);
+    const fmt=v=>v&&typeof v==='object'?`min ${v.min??'—'} / max ${v.max??'—'}`:JSON.stringify(v);
+    html+=`<tr style="background:${bg};border-bottom:1px solid var(--border);">
+      <td style="padding:.4rem .8rem;white-space:nowrap;color:var(--muted);">${ts}</td>
+      <td style="padding:.4rem .8rem;">${e.sensor}</td><td style="padding:.4rem .8rem;">${e.zone}</td>
+      <td style="padding:.4rem .8rem;color:var(--critical);">${fmt(e.old)}</td>
+      <td style="padding:.4rem .8rem;color:var(--success);">${fmt(e.new)}</td></tr>`;
+  });
+  html+='</tbody></table>';
+  con.innerHTML=html;
+})();
+
+// ── Webhook ──────────────────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/webhook').then(r=>r.json());
+  document.getElementById('wh-url').value=cfg.url||'';
+  document.getElementById('wh-active').checked=cfg.active||false;
+  const sel=document.getElementById('wh-format');
+  if(cfg.format) sel.value=cfg.format;
+})();
+
+async function saveWebhook(){
+  const url=document.getElementById('wh-url').value.trim();
+  const active=document.getElementById('wh-active').checked;
+  const format=document.getElementById('wh-format').value;
+  const st=document.getElementById('wh-status');
+  st.textContent='Sauvegarde...';
+  const r=await fetch(`/api/config/webhook?url=${encodeURIComponent(url)}&active=${active}&format=${format}`,{method:'POST'});
+  st.textContent=r.ok?'✓ Webhook enregistré':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  setTimeout(()=>st.textContent='',3000);
+}
+
+// ── Email SMTP ───────────────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/email').then(r=>r.json()).catch(()=>({}));
+  document.getElementById('em-host').value=cfg.smtp_host||'smtp.gmail.com';
+  document.getElementById('em-port').value=cfg.smtp_port||587;
+  document.getElementById('em-user').value=cfg.username||'';
+  document.getElementById('em-from').value=cfg.from_addr||'';
+  document.getElementById('em-to').value=cfg.to_addr||'';
+  document.getElementById('em-active').checked=cfg.active||false;
+})();
+
+async function saveEmail(){
+  const st=document.getElementById('em-status'); st.textContent='Sauvegarde...';
+  const pass=document.getElementById('em-pass').value;
+  const params=new URLSearchParams({
+    smtp_host:document.getElementById('em-host').value,
+    smtp_port:document.getElementById('em-port').value,
+    username:document.getElementById('em-user').value,
+    from_addr:document.getElementById('em-from').value,
+    to_addr:document.getElementById('em-to').value,
+    active:document.getElementById('em-active').checked,
+  });
+  if(pass) params.set('password',pass);
+  const r=await fetch('/api/config/email?'+params.toString(),{method:'POST'});
+  st.textContent=r.ok?'✓ Email enregistré':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  if(r.ok) document.getElementById('em-pass').value='';
+  setTimeout(()=>st.textContent='',4000);
+}
+
+// ── Rapport automatique ──────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/report-schedule').then(r=>r.json()).catch(()=>({}));
+  document.getElementById('rs-freq').value=cfg.frequency||'daily';
+  document.getElementById('rs-hour').value=cfg.hour??8;
+  document.getElementById('rs-days').value=cfg.days_period||1;
+  document.getElementById('rs-active').checked=cfg.active||false;
+})();
+
+async function saveReportSchedule(){
+  const params=new URLSearchParams({
+    active:document.getElementById('rs-active').checked,
+    frequency:document.getElementById('rs-freq').value,
+    hour:document.getElementById('rs-hour').value,
+    days_period:document.getElementById('rs-days').value,
+  });
+  const r=await fetch('/api/config/report-schedule?'+params.toString(),{method:'POST'});
+  showToast(r.ok?'Rapport programmé enregistré':'Erreur',r.ok?'success':'error');
+  document.getElementById('rs-status').textContent=r.ok?'✓ Enregistré':'✗ Erreur';
+  setTimeout(()=>document.getElementById('rs-status').textContent='',3000);
+}
+
+// ── Authentification ─────────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/auth').then(r=>r.json()).catch(()=>({}));
+  document.getElementById('auth-user').value=cfg.username||'admin';
+  document.getElementById('auth-enabled').checked=cfg.enabled||false;
+})();
+
+async function saveAuth(){
+  const st=document.getElementById('auth-status'); st.textContent='Sauvegarde...';
+  const params=new URLSearchParams({enabled:document.getElementById('auth-enabled').checked,username:document.getElementById('auth-user').value});
+  const pass=document.getElementById('auth-pass').value;
+  if(pass) params.set('password',pass);
+  const r=await fetch('/api/config/auth?'+params.toString(),{method:'POST'});
+  st.textContent=r.ok?'✓ Auth enregistrée':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  if(r.ok) document.getElementById('auth-pass').value='';
+  setTimeout(()=>st.textContent='',4000);
+}
+
+// ── Utilisateurs ─────────────────────────────────────────────────
+async function loadUsers(){
+  const r=await fetch('/api/config/auth/users').catch(()=>null);
+  const el=document.getElementById('users-list');
+  if(!r||!r.ok){el.innerHTML='<div style="color:var(--muted);font-size:.85rem;">Non disponible.</div>';return;}
+  const d=await r.json();
+  const users=d.users||{};
+  const entries=Object.entries(users);
+  if(!entries.length){el.innerHTML='<div style="color:var(--muted);font-size:.85rem;">Aucun utilisateur secondaire.</div>';return;}
+  const rc={admin:'var(--critical)',operator:'var(--warning)',viewer:'var(--success)'};
+  let html='<table style="width:100%;border-collapse:collapse;font-size:.88rem;"><thead><tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:.4rem .6rem;">Utilisateur</th><th style="padding:.4rem .6rem;">Rôle</th><th></th></tr></thead><tbody>';
+  entries.forEach(([u,info])=>{
+    html+=`<tr id="user-row-${u}" style="border-bottom:1px solid var(--border);">
+      <td style="padding:.4rem .6rem;">${u}</td>
+      <td style="padding:.4rem .6rem;"><span style="font-weight:600;color:${rc[info.role]||'var(--text)'};">${info.role}</span></td>
+      <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteUser('${u}')">🗑</button></td></tr>`;
+  });
+  html+='</tbody></table>';
+  el.innerHTML=html;
+}
+
+async function addUser(){
+  const u=document.getElementById('nu-user').value.trim();
+  const p=document.getElementById('nu-pass').value;
+  const r=document.getElementById('nu-role').value;
+  if(!u||!p){showToast('Nom et mot de passe requis','warning');return;}
+  const res=await fetch(`/api/config/auth/users?username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}&role=${r}`,{method:'POST'});
+  if(res.ok){showToast(`Utilisateur "${u}" créé`,'success');document.getElementById('nu-user').value='';document.getElementById('nu-pass').value='';loadUsers();}
+  else{const d=await res.json().catch(()=>({}));showToast(d.detail||'Erreur','error');}
+}
+
+async function deleteUser(username){
+  if(!confirm(`Supprimer "${username}" ?`)) return;
+  const res=await fetch(`/api/config/auth/users/${encodeURIComponent(username)}`,{method:'DELETE'});
+  if(res.ok){document.getElementById('user-row-'+username)?.remove();showToast(`"${username}" supprimé`,'info');}
+  else showToast('Erreur suppression','error');
+}
+
+(async()=>{await loadUsers();})();
+
+// ── Zones géographiques ──────────────────────────────────────────
+const _SICONS={temperature:'🌡',turbidity:'💧',ph:'⚗'};
+
+async function loadZones(){
+  const r=await fetch('/api/config/zones').catch(()=>null);
+  if(!r||!r.ok) return;
+  const zones=await r.json();
+  const grid=document.getElementById('zones-grid');
+  grid.innerHTML=Object.entries(zones).map(([sensor,z])=>`
+  <div class="threshold-card" id="zone-card-${sensor}">
+    <h4>${_SICONS[sensor]||'📡'} ${sensor}</h4>
+    <div style="display:grid;gap:.5rem;">
+      <div><label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Nom de zone</label>
+        <input type="text" id="z-zone-${sensor}" value="${z.zone||''}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;"></div>
+      <div><label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Label</label>
+        <input type="text" id="z-label-${sensor}" value="${z.label||sensor}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
+        <div><label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Latitude</label>
+          <input type="number" step="0.0001" id="z-lat-${sensor}" value="${z.lat||0}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;"></div>
+        <div><label style="display:block;font-size:.78rem;margin-bottom:.2rem;">Longitude</label>
+          <input type="number" step="0.0001" id="z-lon-${sensor}" value="${z.lon||0}" style="width:100%;padding:.4rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveZone('${sensor}')">💾 Enregistrer</button>
+    </div>
+  </div>`).join('');
+}
+
+async function saveZone(sensor){
+  const params=new URLSearchParams({
+    zone:document.getElementById(`z-zone-${sensor}`).value.trim(),
+    label:document.getElementById(`z-label-${sensor}`).value.trim(),
+    lat:parseFloat(document.getElementById(`z-lat-${sensor}`).value),
+    lon:parseFloat(document.getElementById(`z-lon-${sensor}`).value),
+  });
+  const r=await fetch(`/api/config/zones/${sensor}?${params.toString()}`,{method:'POST'});
+  if(r.ok){showToast(`Zone ${sensor} enregistrée`,'success');}
+  else showToast('Erreur','error');
+}
+
+(async()=>{await loadZones();})();
+
+// ── Maintenance ──────────────────────────────────────────────────
+async function addMW(){
+  const sensor=document.getElementById('mw-sensor').value;
+  const start=document.getElementById('mw-start').value;
+  const end=document.getElementById('mw-end').value;
+  const reason=document.getElementById('mw-reason').value.trim();
+  if(!start||!end){showToast('Renseigner début et fin','warning');return;}
+  if(end<=start){showToast('La fin doit être après le début','error');return;}
+  const params=new URLSearchParams({start_dt:start,end_dt:end});
+  if(sensor) params.set('sensor',sensor);
+  if(reason) params.set('reason',reason);
+  const r=await fetch('/api/config/maintenance?'+params.toString(),{method:'POST'});
+  if(r.ok){showToast('Fenêtre créée','success');setTimeout(()=>location.reload(),800);}
+  else{const d=await r.json().catch(()=>({}));showToast(d.detail||'Erreur','error');}
+}
+
+async function deleteMW(id){
+  if(!confirm('Supprimer cette fenêtre ?')) return;
+  const r=await fetch(`/api/config/maintenance/${id}`,{method:'DELETE'});
+  if(r.ok){document.getElementById('mw-row-'+id)?.remove();showToast('Fenêtre supprimée','info');}
+  else showToast('Erreur suppression','error');
+}
+</script>
+{% endblock %}
