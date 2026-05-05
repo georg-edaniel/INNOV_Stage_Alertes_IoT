@@ -295,12 +295,16 @@ def map_page(request: Request, db: Session = Depends(get_db)):
 @dashboard_router.get("/presentation", response_class=HTMLResponse)
 def presentation_page(request: Request, db: Session = Depends(get_db)):
     """Mode présentation — affichage mural sans navigation."""
-    svc   = AlertService(db)
-    stats = svc.get_stats()
+    svc    = AlertService(db)
+    stats  = svc.get_stats()
     open_c = svc.get_open_count()
     health = svc.get_sensor_health()
+    mttr   = svc.get_mttr()
+    recent = svc.get_all(resolved=False, limit=6)
     return templates.TemplateResponse(request, "presentation.html", {
         "stats":  stats,
         "open":   open_c,
         "health": health,
+        "mttr":   mttr,
+        "recent": [a.to_dict() for a in recent],
     })

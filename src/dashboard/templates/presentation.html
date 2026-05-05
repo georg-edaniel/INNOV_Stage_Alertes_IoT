@@ -1,203 +1,635 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="night">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mode Présentation — IoT Alertes</title>
   <style>
+    /* ── Variables thème ────────────────────────────────────────────── */
+    :root {
+      --bg:           #0d1117;
+      --bg2:          #161b22;
+      --bg3:          #21262d;
+      --border:       rgba(255,255,255,.08);
+      --text:         #e6edf3;
+      --muted:        rgba(230,237,243,.45);
+      --accent:       #58a6ff;
+      --critical:     #f85149;
+      --warning:      #e3a046;
+      --success:      #3fb950;
+      --card-shadow:  0 4px 24px rgba(0,0,0,.4);
+      --header-bg:    rgba(13,17,23,.85);
+      --gauge-bg:     rgba(255,255,255,.06);
+    }
+    html[data-theme="day"] {
+      --bg:           #f0f4f8;
+      --bg2:          #ffffff;
+      --bg3:          #e8edf2;
+      --border:       rgba(0,0,0,.1);
+      --text:         #1a2332;
+      --muted:        rgba(26,35,50,.5);
+      --accent:       #1a5c9c;
+      --critical:     #d32f2f;
+      --warning:      #e65100;
+      --success:      #2e7d32;
+      --card-shadow:  0 4px 24px rgba(0,0,0,.12);
+      --header-bg:    rgba(240,244,248,.92);
+      --gauge-bg:     rgba(0,0,0,.06);
+    }
+
+    /* ── Reset & base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #0d1117;
-      color: #e6edf3;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      height: 100vh;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: background .4s, color .4s;
     }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 1rem 2rem;
-      background: rgba(255,255,255,.03);
-      border-bottom: 1px solid rgba(255,255,255,.08);
+      padding: .6rem 2rem;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      flex-shrink: 0;
+      gap: 1rem;
     }
-    .header-title { font-size: 1.1rem; font-weight: 600; color: #58a6ff; letter-spacing: .04em; }
-    .header-time  { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #e6edf3; }
-    .header-date  { font-size: .8rem; color: rgba(255,255,255,.4); text-align: right; }
-    .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; margin-right: .5rem; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .header-logo { height: 36px; object-fit: contain; }
+    .header-title {
+      font-size: 1rem; font-weight: 700; color: var(--accent);
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .header-sub { font-size: .72rem; color: var(--muted); }
 
-    .grid {
+    .live-badge {
+      display: flex; align-items: center; gap: .4rem;
+      background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.3);
+      color: var(--success); padding: .25rem .7rem; border-radius: 20px;
+      font-size: .75rem; font-weight: 600;
+    }
+    .live-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--success);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+
+    .header-center { display: flex; align-items: center; gap: 1.2rem; }
+
+    .header-right { text-align: right; flex-shrink: 0; }
+    .clock { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); line-height: 1; }
+    .clock-date { font-size: .72rem; color: var(--muted); margin-top: .1rem; }
+
+    /* Bouton thème */
+    .theme-btn {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); padding: .35rem .8rem;
+      border-radius: 20px; cursor: pointer; font-size: .85rem;
+      transition: all .2s; display: flex; align-items: center; gap: .4rem;
+    }
+    .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Bouton quitter */
+    .exit-btn {
+      background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.25);
+      color: var(--critical); padding: .35rem .8rem;
+      border-radius: 20px; cursor: pointer; font-size: .78rem;
+      text-decoration: none; transition: all .2s;
+      display: flex; align-items: center; gap: .4rem;
+    }
+    .exit-btn:hover { background: rgba(248,81,73,.2); }
+
+    /* ── Contenu principal ───────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: .8rem 1.5rem;
+      gap: .8rem;
+      overflow: hidden;
+    }
+
+    /* ── Rangée KPI ─────────────────────────────────────────────────── */
+    .kpi-row {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.2rem;
-      padding: 1.5rem 2rem;
+      grid-template-columns: repeat(6, 1fr);
+      gap: .8rem;
+      flex-shrink: 0;
     }
     .kpi {
-      background: rgba(255,255,255,.05);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 12px;
-      padding: 1.5rem;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: .9rem 1rem;
       text-align: center;
+      box-shadow: var(--card-shadow);
+      transition: background .4s, border-color .4s;
+      position: relative;
+      overflow: hidden;
     }
-    .kpi.critical { border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.06); }
-    .kpi.warning  { border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.06); }
-    .kpi.success  { border-color: rgba(63,185,80,.4);  background: rgba(63,185,80,.06); }
-    .kpi-label { font-size: .75rem; color: rgba(255,255,255,.5); text-transform: uppercase; letter-spacing: .08em; margin-bottom: .5rem; }
-    .kpi-value { font-size: 3.5rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-    .kpi.critical .kpi-value { color: #f85149; }
-    .kpi.warning  .kpi-value { color: #d29922; }
-    .kpi.success  .kpi-value { color: #3fb950; }
-    .kpi-value    { color: #58a6ff; }
-    .kpi-sub  { font-size: .78rem; color: rgba(255,255,255,.4); margin-top: .4rem; }
+    .kpi::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    }
+    .kpi.critical::before { background: var(--critical); }
+    .kpi.warning::before  { background: var(--warning); }
+    .kpi.success::before  { background: var(--success); }
+    .kpi.info::before     { background: var(--accent); }
+    .kpi.neutral::before  { background: var(--muted); }
 
+    .kpi-icon { font-size: 1.3rem; margin-bottom: .2rem; }
+    .kpi-label {
+      font-size: .65rem; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .08em; margin-bottom: .3rem;
+    }
+    .kpi-value {
+      font-size: 2.6rem; font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi.critical .kpi-value { color: var(--critical); }
+    .kpi.warning  .kpi-value { color: var(--warning); }
+    .kpi.success  .kpi-value { color: var(--success); }
+    .kpi.info     .kpi-value { color: var(--accent); }
+    .kpi.neutral  .kpi-value { color: var(--text); }
+    .kpi-sub { font-size: .68rem; color: var(--muted); margin-top: .3rem; }
+
+    /* Flash critique */
+    @keyframes flash-red {
+      0%,100% { box-shadow: inset 0 0 0 0px var(--critical); }
+      50%     { box-shadow: inset 0 0 0 3px var(--critical); }
+    }
+    body.flash { animation: flash-red .6s ease 3; }
+
+    /* ── Rangée capteurs ────────────────────────────────────────────── */
     .sensors-row {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1.2rem;
-      padding: 0 2rem 1.5rem;
+      gap: .8rem;
+      flex-shrink: 0;
     }
     .sensor-card {
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 12px;
-      padding: 1.2rem 1.5rem;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem 1.2rem;
+      box-shadow: var(--card-shadow);
       display: flex;
       align-items: center;
       gap: 1rem;
+      transition: background .4s, border-color .3s;
     }
-    .sensor-icon { font-size: 2rem; }
-    .sensor-name { font-size: .8rem; color: rgba(255,255,255,.5); margin-bottom: .3rem; }
-    .sensor-value { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .sensor-level { font-size: .7rem; padding: .2rem .6rem; border-radius: 20px; font-weight: 600; text-transform: uppercase; margin-top: .3rem; display: inline-block; }
-    .lv-normal   { background: rgba(63,185,80,.2);  color: #3fb950; }
-    .lv-warning  { background: rgba(210,153,34,.2); color: #d29922; }
-    .lv-critical { background: rgba(248,81,73,.2);  color: #f85149; }
-    .lv-unknown  { background: rgba(255,255,255,.1);color: #8b949e; }
+    .sensor-card.lv-critical { border-color: rgba(248,81,73,.4); }
+    .sensor-card.lv-warning  { border-color: rgba(227,160,70,.4); }
+    .sensor-card.lv-normal   { border-color: rgba(63,185,80,.25); }
 
-    .footer {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      padding: .6rem 2rem;
-      background: rgba(0,0,0,.5);
+    /* Jauge SVG demi-cercle */
+    .gauge-wrap { position: relative; width: 80px; height: 48px; flex-shrink: 0; }
+    .gauge-wrap svg { width: 80px; height: 48px; }
+    .gauge-bg   { fill: none; stroke: var(--gauge-bg); stroke-width: 7; stroke-linecap: round; }
+    .gauge-fill { fill: none; stroke-width: 7; stroke-linecap: round;
+                  transition: stroke-dashoffset .8s cubic-bezier(.4,0,.2,1), stroke .5s; }
+    .gauge-val {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      font-size: .75rem; font-weight: 800; font-variant-numeric: tabular-nums;
+      white-space: nowrap; color: var(--text);
+    }
+
+    .sensor-info { flex: 1; min-width: 0; }
+    .sensor-icon { font-size: 1.6rem; line-height: 1; }
+    .sensor-name { font-size: .7rem; color: var(--muted); margin-bottom: .15rem; }
+    .sensor-value-big {
+      font-size: 1.6rem; font-weight: 800;
+      font-variant-numeric: tabular-nums; line-height: 1.1;
+    }
+    .sensor-badge {
+      display: inline-block; font-size: .65rem; font-weight: 700;
+      padding: .15rem .5rem; border-radius: 20px; margin-top: .25rem;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .lv-normal   .sensor-badge { background: rgba(63,185,80,.15);  color: var(--success); border: 1px solid rgba(63,185,80,.3); }
+    .lv-warning  .sensor-badge { background: rgba(227,160,70,.15); color: var(--warning); border: 1px solid rgba(227,160,70,.3); }
+    .lv-critical .sensor-badge { background: rgba(248,81,73,.15);  color: var(--critical);border: 1px solid rgba(248,81,73,.3); }
+    .lv-unknown  .sensor-badge { background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
+
+    .sensor-trend { font-size: .75rem; font-weight: 600; margin-left: .3rem; }
+    .trend-up   { color: var(--critical); }
+    .trend-down { color: var(--success); }
+    .trend-flat { color: var(--muted); }
+
+    /* ── Alertes récentes ───────────────────────────────────────────── */
+    .alerts-section {
+      flex: 1;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: var(--card-shadow);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .alerts-header {
+      padding: .6rem 1.2rem;
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      font-size: .75rem;
-      color: rgba(255,255,255,.3);
-      border-top: 1px solid rgba(255,255,255,.06);
+      background: var(--bg3);
+      flex-shrink: 0;
     }
-    .exit-btn {
-      position: fixed;
-      top: 1rem; right: 1rem;
-      background: rgba(255,255,255,.08);
-      border: 1px solid rgba(255,255,255,.15);
-      color: rgba(255,255,255,.5);
-      padding: .4rem .9rem;
-      border-radius: 6px;
-      font-size: .78rem;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all .2s;
+    .alerts-header-title {
+      font-size: .8rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
     }
-    .exit-btn:hover { background: rgba(255,255,255,.15); color: #fff; }
+    .alerts-header-count {
+      font-size: .75rem; background: rgba(248,81,73,.15);
+      color: var(--critical); padding: .15rem .55rem;
+      border-radius: 20px; font-weight: 700;
+    }
+    .alerts-body {
+      flex: 1; overflow-y: auto; padding: .4rem 0;
+    }
+    .alert-row {
+      display: grid;
+      grid-template-columns: 7rem 9rem 1fr 8rem 5rem;
+      align-items: center;
+      gap: .6rem;
+      padding: .45rem 1.2rem;
+      border-bottom: 1px solid var(--border);
+      font-size: .82rem;
+      transition: background .15s;
+    }
+    .alert-row:last-child { border-bottom: none; }
+    .alert-row:hover { background: var(--bg3); }
+    .alert-no-data {
+      text-align: center; padding: 1.5rem;
+      color: var(--muted); font-size: .85rem;
+    }
+
+    .lvbadge {
+      display: inline-block; padding: .2rem .55rem;
+      border-radius: 20px; font-size: .7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+    }
+    .lvbadge.CRITICAL { background: rgba(248,81,73,.15);  color: var(--critical); border: 1px solid rgba(248,81,73,.3); }
+    .lvbadge.WARNING  { background: rgba(227,160,70,.15); color: var(--warning);  border: 1px solid rgba(227,160,70,.3); }
+    .lvbadge.NORMAL   { background: rgba(63,185,80,.15);  color: var(--success);  border: 1px solid rgba(63,185,80,.3); }
+
+    .alert-sensor { font-weight: 600; color: var(--accent); }
+    .alert-value  { color: var(--text); }
+    .alert-reason { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .alert-time   { color: var(--muted); font-size: .72rem; text-align: right; }
+    .alert-ack    { font-size: .7rem; color: var(--muted); text-align: center; }
+    .ack-yes { color: var(--success); }
+
+    /* ── Footer ─────────────────────────────────────────────────────── */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .35rem 2rem;
+      background: var(--header-bg);
+      border-top: 1px solid var(--border);
+      font-size: .7rem;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    /* Scrollbar discrète */
+    .alerts-body::-webkit-scrollbar { width: 4px; }
+    .alerts-body::-webkit-scrollbar-track { background: transparent; }
+    .alerts-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
   </style>
 </head>
 <body>
 
+<!-- ── HEADER ────────────────────────────────────────────────────── -->
 <div class="header">
-  <div class="header-title"><span class="live-dot"></span>IoT Alert System — Monitoring temps réel</div>
-  <div style="text-align:right;">
-    <div class="header-time" id="clock">--:--:--</div>
-    <div class="header-date" id="date-display">--</div>
-  </div>
-</div>
-
-<div class="grid">
-  <div class="kpi critical">
-    <div class="kpi-label">Alertes critiques</div>
-    <div class="kpi-value" id="kpi-critical">{{ stats.critical }}</div>
-    <div class="kpi-sub" id="kpi-open-critical">{{ open.critical }} ouvertes</div>
-  </div>
-  <div class="kpi warning">
-    <div class="kpi-label">Avertissements</div>
-    <div class="kpi-value" id="kpi-warning">{{ stats.warning }}</div>
-    <div class="kpi-sub" id="kpi-open-warning">{{ open.warning }} ouvertes</div>
-  </div>
-  <div class="kpi success">
-    <div class="kpi-label">Résolues</div>
-    <div class="kpi-value" id="kpi-resolved">{{ stats.resolved }}</div>
-    <div class="kpi-sub">sur <span id="kpi-total">{{ stats.total }}</span> au total</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-label">Acquittées</div>
-    <div class="kpi-value" id="kpi-acknowledged">{{ stats.acknowledged }}</div>
-    <div class="kpi-sub">opérateur notifié</div>
-  </div>
-</div>
-
-<div class="sensors-row">
-  {% for sensor, icon, label in [('temperature','🌡','Température'),('turbidity','💧','Turbidité'),('ph','⚗','pH')] %}
-  <div class="sensor-card">
-    <div class="sensor-icon">{{ icon }}</div>
+  <div class="header-left">
+    <img src="/static/innov_logo.png" class="header-logo" alt="INNOV" onerror="this.style.display='none'">
     <div>
-      <div class="sensor-name">{{ label }}</div>
-      <div class="sensor-value" id="pres-val-{{ sensor }}">
-        {% set h = health[sensor] %}{{ h.value if h.value else '—' }} {{ h.unit if h.unit else '' }}
-      </div>
-      <span class="sensor-level lv-{{ health[sensor].level | lower }}" id="pres-lv-{{ sensor }}">
-        {{ health[sensor].level }}
-      </span>
+      <div class="header-title">IoT Alert System</div>
+      <div class="header-sub">INNOV / CCNB — Monitoring temps réel</div>
     </div>
   </div>
-  {% endfor %}
+
+  <div class="header-center">
+    <div class="live-badge"><div class="live-dot"></div> EN DIRECT</div>
+    <button class="theme-btn" onclick="toggleTheme()" id="theme-btn">☀️ Mode Jour</button>
+    <a href="/" class="exit-btn">✕ Quitter</a>
+  </div>
+
+  <div class="header-right">
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="clock-date" id="date-display">--</div>
+  </div>
 </div>
 
-<a href="/" class="exit-btn">✕ Quitter</a>
+<!-- ── CONTENU ───────────────────────────────────────────────────── -->
+<div class="main">
 
+  <!-- KPI -->
+  <div class="kpi-row">
+    <div class="kpi critical">
+      <div class="kpi-icon">🔴</div>
+      <div class="kpi-label">Critiques</div>
+      <div class="kpi-value" id="kpi-critical">{{ stats.critical }}</div>
+      <div class="kpi-sub" id="kpi-open-critical">{{ open.critical }} ouvertes</div>
+    </div>
+    <div class="kpi warning">
+      <div class="kpi-icon">🟡</div>
+      <div class="kpi-label">Avertissements</div>
+      <div class="kpi-value" id="kpi-warning">{{ stats.warning }}</div>
+      <div class="kpi-sub" id="kpi-open-warning">{{ open.warning }} ouvertes</div>
+    </div>
+    <div class="kpi success">
+      <div class="kpi-icon">✅</div>
+      <div class="kpi-label">Résolues</div>
+      <div class="kpi-value" id="kpi-resolved">{{ stats.resolved }}</div>
+      <div class="kpi-sub">sur <span id="kpi-total">{{ stats.total }}</span> au total</div>
+    </div>
+    <div class="kpi info">
+      <div class="kpi-icon">👁</div>
+      <div class="kpi-label">Acquittées</div>
+      <div class="kpi-value" id="kpi-acknowledged">{{ stats.acknowledged }}</div>
+      <div class="kpi-sub">opérateur notifié</div>
+    </div>
+    <div class="kpi neutral">
+      <div class="kpi-icon">📊</div>
+      <div class="kpi-label">Total alertes</div>
+      <div class="kpi-value" id="kpi-total2">{{ stats.total }}</div>
+      <div class="kpi-sub">depuis le début</div>
+    </div>
+    <div class="kpi {% if mttr %}info{% else %}neutral{% endif %}">
+      <div class="kpi-icon">⏱</div>
+      <div class="kpi-label">MTTR moyen</div>
+      <div class="kpi-value" id="kpi-mttr" style="font-size:1.8rem;">
+        {% if mttr %}{{ "%.0f"|format(mttr) }}m{% else %}—{% endif %}
+      </div>
+      <div class="kpi-sub">temps de résolution</div>
+    </div>
+  </div>
+
+  <!-- Capteurs -->
+  <div class="sensors-row">
+    {% set sensor_meta = [
+      ('temperature', '🌡', 'Température', 0, 50, 'NORMAL'),
+      ('turbidity',   '💧', 'Turbidité',   0, 100, 'NORMAL'),
+      ('ph',          '⚗', 'pH',           0, 14,  'NORMAL'),
+    ] %}
+    {% for sensor, icon, label, vmin, vmax, default_level in sensor_meta %}
+    {% set h = health.get(sensor, {}) %}
+    {% set level = h.get('level', 'unknown') | lower %}
+    <div class="sensor-card lv-{{ level }}" id="card-{{ sensor }}">
+      <!-- Jauge SVG -->
+      <div class="gauge-wrap">
+        {% set val = h.get('value') %}
+        {% set pct = [[(val - vmin) / (vmax - vmin) if val is not none else 0, 0] | max, 1] | min if val is not none else 0 %}
+        {% set circ = 100 %}
+        {% set dash = (pct * circ) | round(1) %}
+        {% set color = '#f85149' if level == 'critical' else ('#e3a046' if level == 'warning' else '#3fb950') %}
+        <svg viewBox="0 0 80 48">
+          <!-- Demi-cercle fond -->
+          <path class="gauge-bg"
+            d="M 8 44 A 32 32 0 0 1 72 44"
+            stroke-dasharray="{{ circ }} {{ circ }}"
+            stroke-dashoffset="0"/>
+          <!-- Demi-cercle remplissage -->
+          <path class="gauge-fill" id="gauge-{{ sensor }}"
+            d="M 8 44 A 32 32 0 0 1 72 44"
+            stroke="{{ color }}"
+            stroke-dasharray="{{ circ }} {{ circ }}"
+            stroke-dashoffset="{{ (circ - dash) | round(1) }}"
+            data-vmin="{{ vmin }}" data-vmax="{{ vmax }}" data-circ="{{ circ }}"/>
+        </svg>
+        <div class="gauge-val" id="gauge-val-{{ sensor }}">
+          {{ "%.1f"|format(val) if val is not none else '—' }}{{ h.get('unit','') }}
+        </div>
+      </div>
+      <!-- Infos capteur -->
+      <div class="sensor-info">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.2rem;">
+          <span class="sensor-icon">{{ icon }}</span>
+          <span class="sensor-name">{{ label }}</span>
+        </div>
+        <div class="sensor-value-big" id="pres-val-{{ sensor }}">
+          {{ "%.2f"|format(val) if val is not none else '—' }} {{ h.get('unit','') }}
+        </div>
+        <div>
+          <span class="sensor-badge" id="pres-lv-{{ sensor }}">{{ h.get('level','—') }}</span>
+          <span class="sensor-trend" id="pres-trend-{{ sensor }}">—</span>
+        </div>
+        <div style="font-size:.65rem;color:var(--muted);margin-top:.2rem;">
+          Min {{ vmin }} · Max {{ vmax }} {{ h.get('unit','') }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Alertes récentes -->
+  <div class="alerts-section">
+    <div class="alerts-header">
+      <div class="alerts-header-title">⚡ Alertes ouvertes récentes</div>
+      <div class="alerts-header-count" id="open-count-badge">{{ open.critical + open.warning }} ouvertes</div>
+    </div>
+    <div class="alerts-body" id="alerts-body">
+      {% if recent %}
+        {% for a in recent %}
+        <div class="alert-row">
+          <span class="lvbadge {{ a.level }}">{{ a.level }}</span>
+          <span class="alert-sensor">{{ a.sensor }}</span>
+          <span class="alert-value">{{ "%.2f"|format(a.value) }} {{ a.unit }}</span>
+          <span class="alert-reason">{{ a.reason or '—' }}</span>
+          <span class="alert-time">{{ a.created_at[:16].replace('T',' ') if a.created_at else '—' }}</span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="alert-no-data">✅ Aucune alerte ouverte en ce moment</div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────── -->
 <div class="footer">
-  <span>INNOV / CCNB — Système d'alertes IoT 2026</span>
-  <span id="last-update">Mise à jour en cours...</span>
+  <span>INNOV / CCNB — Système d'alertes IoT © 2026</span>
+  <span id="last-update">Connexion en cours...</span>
+  <span id="conn-status">⏳</span>
 </div>
 
 <script>
-// Horloge
+/* ── Horloge ─────────────────────────────────────────────────────── */
 function updateClock() {
   const now = new Date();
   document.getElementById('clock').textContent = now.toLocaleTimeString('fr-FR');
-  document.getElementById('date-display').textContent = now.toLocaleDateString('fr-FR', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('date-display').textContent =
+    now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
 }
 updateClock();
 setInterval(updateClock, 1000);
 
-// SSE pour mises à jour temps réel
-const es = new EventSource('/api/stream');
-es.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type !== 'tick') return;
-  const s = data.stats;
-  document.getElementById('kpi-critical').textContent    = s.critical;
-  document.getElementById('kpi-warning').textContent     = s.warning;
-  document.getElementById('kpi-resolved').textContent    = s.resolved;
-  document.getElementById('kpi-acknowledged').textContent= s.acknowledged;
-  document.getElementById('kpi-total').textContent       = s.total;
-  document.getElementById('kpi-open-critical').textContent = `${s.critical} ouvertes`;
-  document.getElementById('kpi-open-warning').textContent  = `${s.warning} ouvertes`;
-  if (data.sensor_health) {
-    for (const [sensor, info] of Object.entries(data.sensor_health)) {
-      const valEl = document.getElementById('pres-val-' + sensor);
-      const lvEl  = document.getElementById('pres-lv-' + sensor);
-      if (valEl) valEl.textContent = info.value !== null ? `${info.value} ${info.unit}` : '—';
-      if (lvEl) { lvEl.textContent = info.level; lvEl.className = 'sensor-level lv-' + info.level.toLowerCase(); }
+/* ── Thème jour / nuit ───────────────────────────────────────────── */
+const html = document.documentElement;
+let theme = localStorage.getItem('pres_theme') || 'night';
+applyTheme(theme);
+
+function applyTheme(t) {
+  html.setAttribute('data-theme', t);
+  const btn = document.getElementById('theme-btn');
+  btn.textContent = t === 'night' ? '☀️ Mode Jour' : '🌙 Mode Nuit';
+  localStorage.setItem('pres_theme', t);
+}
+function toggleTheme() {
+  theme = theme === 'night' ? 'day' : 'night';
+  applyTheme(theme);
+}
+
+/* ── Jauge SVG : mise à jour ─────────────────────────────────────── */
+const GAUGE_COLORS = { CRITICAL:'#f85149', WARNING:'#e3a046', NORMAL:'#3fb950', UNKNOWN:'#8b949e' };
+let prevValues = {};
+
+function updateGauge(sensor, value, level) {
+  const el = document.getElementById('gauge-' + sensor);
+  if (!el) return;
+  const vmin  = parseFloat(el.dataset.vmin);
+  const vmax  = parseFloat(el.dataset.vmax);
+  const circ  = parseFloat(el.dataset.circ);
+  const pct   = Math.min(1, Math.max(0, (value - vmin) / (vmax - vmin)));
+  const dash  = pct * circ;
+  el.style.strokeDashoffset = (circ - dash).toFixed(1);
+  el.style.stroke = GAUGE_COLORS[level] || '#8b949e';
+}
+
+function trendArrow(sensor, newVal) {
+  const el = document.getElementById('pres-trend-' + sensor);
+  if (!el) return;
+  const prev = prevValues[sensor];
+  if (prev === undefined) { el.textContent = '—'; el.className = 'sensor-trend trend-flat'; }
+  else if (newVal > prev + 0.05) { el.textContent = '▲'; el.className = 'sensor-trend trend-up'; }
+  else if (newVal < prev - 0.05) { el.textContent = '▼'; el.className = 'sensor-trend trend-down'; }
+  else { el.textContent = '→'; el.className = 'sensor-trend trend-flat'; }
+  prevValues[sensor] = newVal;
+}
+
+/* ── SSE ─────────────────────────────────────────────────────────── */
+function connectSSE() {
+  const es = new EventSource('/api/stream');
+
+  es.onopen = () => {
+    document.getElementById('conn-status').textContent = '🟢 Connecté';
+  };
+
+  es.onerror = () => {
+    document.getElementById('conn-status').textContent = '🔴 Reconnexion...';
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
+
+  es.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    if (data.type !== 'tick') return;
+
+    /* KPIs */
+    const s = data.stats || {};
+    const upd = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    upd('kpi-critical',     s.critical ?? '—');
+    upd('kpi-warning',      s.warning  ?? '—');
+    upd('kpi-resolved',     s.resolved ?? '—');
+    upd('kpi-acknowledged', s.acknowledged ?? '—');
+    upd('kpi-total',        s.total ?? '—');
+    upd('kpi-total2',       s.total ?? '—');
+    upd('kpi-open-critical', `${s.critical ?? 0} ouvertes`);
+    upd('kpi-open-warning',  `${s.warning  ?? 0} ouvertes`);
+
+    const totalOpen = (s.critical ?? 0) + (s.warning ?? 0);
+    upd('open-count-badge', `${totalOpen} ouvertes`);
+
+    /* Capteurs */
+    if (data.sensor_health) {
+      for (const [sensor, info] of Object.entries(data.sensor_health)) {
+        const val   = info.value;
+        const level = (info.level || 'unknown').toUpperCase();
+        const unit  = info.unit || '';
+
+        // Valeur affichée
+        const valEl = document.getElementById('pres-val-' + sensor);
+        if (valEl) valEl.textContent = val !== null ? `${parseFloat(val).toFixed(2)} ${unit}` : '—';
+
+        // Jauge mini
+        const gvEl = document.getElementById('gauge-val-' + sensor);
+        if (gvEl) gvEl.textContent = val !== null ? `${parseFloat(val).toFixed(1)}${unit}` : '—';
+        if (val !== null) updateGauge(sensor, parseFloat(val), level);
+
+        // Badge niveau
+        const lvEl = document.getElementById('pres-lv-' + sensor);
+        if (lvEl) lvEl.textContent = info.level || '—';
+
+        // Couleur carte
+        const card = document.getElementById('card-' + sensor);
+        if (card) {
+          card.className = 'sensor-card lv-' + (info.level || 'unknown').toLowerCase();
+        }
+
+        // Tendance
+        if (val !== null) trendArrow(sensor, parseFloat(val));
+      }
     }
-  }
-  // Flash rouge si alerte critique
-  if (data.alerts && data.alerts.some(a => a.level === 'CRITICAL')) {
-    document.body.style.boxShadow = 'inset 0 0 0 4px #f85149';
-    setTimeout(() => document.body.style.boxShadow = '', 1500);
-  }
-  document.getElementById('last-update').textContent = 'Dernière mise à jour : ' + new Date().toLocaleTimeString('fr-FR');
-};
+
+    /* Flash critique */
+    if (data.alerts && data.alerts.some(a => a.level === 'CRITICAL' && !a.acknowledged)) {
+      document.body.classList.add('flash');
+      setTimeout(() => document.body.classList.remove('flash'), 2000);
+    }
+
+    /* Alertes récentes (reload léger) */
+    refreshAlerts();
+
+    document.getElementById('last-update').textContent =
+      'Mis à jour : ' + new Date().toLocaleTimeString('fr-FR');
+  };
+}
+
+/* ── Rafraîchissement des alertes ───────────────────────────────── */
+let lastAlertFetch = 0;
+async function refreshAlerts() {
+  const now = Date.now();
+  if (now - lastAlertFetch < 8000) return;   // max toutes les 8s
+  lastAlertFetch = now;
+  try {
+    const r = await fetch('/api/alerts?resolved=false&limit=6');
+    if (!r.ok) return;
+    const alerts = await r.json();
+    const body = document.getElementById('alerts-body');
+    if (!alerts.length) {
+      body.innerHTML = '<div class="alert-no-data">✅ Aucune alerte ouverte en ce moment</div>';
+      return;
+    }
+    body.innerHTML = alerts.map(a => {
+      const dt = a.created_at ? a.created_at.substring(0,16).replace('T',' ') : '—';
+      const val = a.value !== null ? parseFloat(a.value).toFixed(2) + ' ' + (a.unit||'') : '—';
+      return `<div class="alert-row">
+        <span class="lvbadge ${a.level}">${a.level}</span>
+        <span class="alert-sensor">${a.sensor}</span>
+        <span class="alert-value">${val}</span>
+        <span class="alert-reason">${a.reason || '—'}</span>
+        <span class="alert-time">${dt}</span>
+      </div>`;
+    }).join('');
+  } catch {}
+}
+
+connectSSE();
 </script>
 </body>
 </html>
