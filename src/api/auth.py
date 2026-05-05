@@ -227,6 +227,29 @@ def get_user_profile(username: str) -> dict:
     return {}
 
 
+def admin_update_user(
+    username: str,
+    role: str | None = None,
+    display_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    password: str | None = None,
+) -> dict:
+    """Mise à jour complète d'un utilisateur par l'admin (rôle + profil)."""
+    cfg = _load_config()
+    users = cfg.get("users", {})
+    if username not in users:
+        return {}
+    u = users[username]
+    if role         is not None: u["role"]         = role
+    if display_name is not None: u["display_name"] = display_name
+    if email        is not None: u["email"]        = email
+    if phone        is not None: u["phone"]        = phone
+    if password:                 u["password_hash"] = hashlib.sha256(password.encode()).hexdigest()
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    return get_user_profile(username)
+
+
 def remove_user(username: str) -> dict:
     """Supprime un utilisateur."""
     cfg = _load_config()

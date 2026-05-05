@@ -12,7 +12,7 @@ Config    : GET/POST /api/config/thresholds, POST /api/config/thresholds/reset
 
 import csv
 import io
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -271,6 +271,62 @@ def ingest_reading(
         "reason":  result.reason,
         "alert":   alert.to_dict() if alert else None,
     }
+
+
+@ingest_router.post("/upload")
+async def ingest_upload(
+    file: UploadFile,
+    db:   Session = Depends(get_db),
+):
+    """
+    Import de lectures IoT depuis un fichier CSV ou JSON.
+    CSV attendu : sensor,value,unit  (une ligne d'en-tête)
+    JSON attendu: [{"sensor":"temperature","value":22.5,"unit":"°C"}, ...]
+    """
+    import csv, io, json as _json
+    VALID = {"temperature", "turbidity", "ph"}
+
+    content = await file.read()
+    rows = []
+
+    if file.filename.endswith(".json"):
+        try:
+            data = _json.loads(content.decode("utf-8", errors="replace"))
+            rows = data if isinstance(data, list) else []
+        except Exception:
+            raise HTTPException(400, "Fichier JSON invalide")
+    else:
+        # CSV
+        try:
+            reader = csv.DictReader(io.StringIO(content.decode("utf-8", errors="replace")))
+            for r in reader:
+                rows.append({"sensor": r.get("sensor","").strip(),
+                             "value":  r.get("value","0").strip(),
+                             "unit":   r.get("unit","").strip()})
+        except Exception:
+            raise HTTPException(400, "Fichier CSV invalide")
+
+    from ..simulator.generator import SensorReading
+    svc = AlertService(db, user="import_fichier")
+    created, skipped, alerts_n = 0, 0, 0
+
+    for row in rows:
+        sensor = str(row.get("sensor","")).strip()
+        if sensor not in VALID:
+            skipped += 1; continue
+        try:
+            value = float(row.get("value", 0))
+        except (ValueError, TypeError):
+            skipped += 1; continue
+        unit = str(row.get("unit","")).strip() or "?"
+
+        reading = SensorReading(sensor=sensor, value=value, unit=unit, scenario="import")
+        result  = _engine.analyze(reading)
+        alert   = svc.process(result, reading)
+        created += 1
+        if alert: alerts_n += 1
+
+    return {"imported": created, "skipped": skipped, "alerts_created": alerts_n}
 
 
 # ── /api/logs ─────────────────────────────────────────────────────────────
@@ -699,6 +755,27 @@ def get_user_profile_admin(username: str, request: Request):
     if not profile:
         raise HTTPException(404, "Utilisateur non trouvé")
     return profile
+
+
+@config_router.put("/auth/users/{username}")
+def update_user_admin(
+    username:     str,
+    request:      Request,
+    role:         str | None = Query(None),
+    display_name: str | None = Query(None),
+    email:        str | None = Query(None),
+    phone:        str | None = Query(None),
+    password:     str | None = Query(None),
+):
+    """Met à jour le rôle et le profil d'un utilisateur (admin uniquement)."""
+    from .auth import admin_update_user, is_admin
+    if not is_admin(request):
+        raise HTTPException(403, "Accès réservé aux administrateurs")
+    result = admin_update_user(username, role=role, display_name=display_name,
+                               email=email, phone=phone, password=password or None)
+    if not result:
+        raise HTTPException(404, "Utilisateur non trouvé")
+    return result
 
 
 @config_router.delete("/auth/users/{username}")

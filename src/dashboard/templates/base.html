@@ -13,10 +13,15 @@
   <meta name="apple-mobile-web-app-title" content="IoT Alertes">
 </head>
 <body>
+<!-- Bouton menu mobile -->
+<button class="menu-toggle" id="menu-toggle" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+<!-- Overlay mobile -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
 <div class="layout">
 
   <!-- Sidebar -->
-  <nav class="sidebar">
+  <nav class="sidebar" id="sidebar">
     <div style="background:#fff;border-radius:8px;padding:.45rem .8rem;margin-bottom:.6rem;display:inline-flex;align-items:center;">
       <img src="/static/innov_logo.png" alt="INNOV" style="height:28px;object-fit:contain;display:block;">
     </div>
@@ -60,7 +65,14 @@
     <!-- Footer sidebar -->
     <div class="sidebar-footer">
       <button class="dark-toggle" id="dark-toggle-btn" onclick="toggleDark()">🌙 Mode sombre</button>
-      <button class="notif-btn" id="notif-btn" onclick="requestNotifications()">🔔 Notifications</button>
+      <div style="position:relative;display:flex;gap:.3rem;">
+        <button class="notif-btn" id="notif-btn" onclick="requestNotifications()" style="flex:1;">🔔 Notifications</button>
+        <button class="notif-btn" onclick="toggleNotifHistory()" title="Historique notifications"
+          style="padding:.5rem .6rem;flex-shrink:0;position:relative;">
+          📋
+          <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#e74c3c;color:#fff;border-radius:50%;width:16px;height:16px;font-size:.65rem;align-items:center;justify-content:center;font-weight:700;"></span>
+        </button>
+      </div>
       <a href="/profile" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">👤 Mon profil</a>
       <a href="/logout" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">🔓 Déconnexion</a>
     </div>
@@ -99,6 +111,22 @@ function showToast(message, type = 'info', duration = 3500) {
   }, duration);
 }
 
+// ── Sidebar mobile ─────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const isOpen = sb.classList.toggle('open');
+  ov.classList.toggle('open', isOpen);
+  document.getElementById('menu-toggle').textContent = isOpen ? '✕' : '☰';
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+  document.getElementById('menu-toggle').textContent = '☰';
+}
+// Fermer sidebar sur navigation (mobile)
+document.querySelectorAll('.nav-item').forEach(a => a.addEventListener('click', closeSidebar));
+
 // ── PWA Service Worker ─────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/sw.js').catch(() => {});
@@ -124,12 +152,10 @@ if (document.body.classList.contains('dark')) {
 
 // ── Notifications navigateur ───────────────────────────────────
 let _notifGranted = (Notification.permission === 'granted');
+let _notifHistory = JSON.parse(localStorage.getItem('notif_history') || '[]');
 
 function requestNotifications() {
-  if (!('Notification' in window)) {
-    alert('Les notifications ne sont pas supportées par ce navigateur.');
-    return;
-  }
+  if (!('Notification' in window)) { showToast('Notifications non supportées', 'warning'); return; }
   Notification.requestPermission().then(p => {
     _notifGranted = (p === 'granted');
     const btn = document.getElementById('notif-btn');
@@ -138,10 +164,58 @@ function requestNotifications() {
   });
 }
 
+// Son d'alerte via Web Audio API
+function playAlertSound(level) {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (level === 'CRITICAL') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.30);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start(); osc.stop(ctx.currentTime + 0.5);
+    } else {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(520, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(); osc.stop(ctx.currentTime + 0.3);
+    }
+  } catch(_) {}
+}
+
 function sendNotification(title, body, level) {
+  // Historique
+  const entry = { title, body, level, time: new Date().toLocaleTimeString('fr-FR') };
+  _notifHistory.unshift(entry);
+  if (_notifHistory.length > 20) _notifHistory.pop();
+  localStorage.setItem('notif_history', JSON.stringify(_notifHistory));
+  updateNotifBadge();
+
+  // Son
+  if (localStorage.getItem('notif_sound') !== '0') playAlertSound(level);
+
+  // Notification navigateur
   if (!_notifGranted) return;
   const icon = level === 'CRITICAL' ? '🚨' : '⚠️';
-  new Notification(`${icon} ${title}`, { body, icon: '/static/favicon.ico' });
+  const n = new Notification(`${icon} ${title}`, { body, icon: '/static/favicon.ico',
+    badge: '/static/favicon.ico', tag: level });
+  n.onclick = () => { window.focus(); n.close(); };
+}
+
+function updateNotifBadge() {
+  const badge = document.getElementById('notif-badge');
+  if (badge) {
+    const count = _notifHistory.filter(n => n.level === 'CRITICAL').length;
+    badge.textContent = count || '';
+    badge.style.display = count ? 'flex' : 'none';
+  }
 }
 
 // Mettre à jour le bouton selon l'état actuel
@@ -149,6 +223,7 @@ if (Notification.permission === 'granted') {
   document.getElementById('notif-btn').textContent = '🔔 Notifs actives';
   document.getElementById('notif-btn').style.color = '#27ae60';
 }
+updateNotifBadge();
 
 // ── Générer une lecture ────────────────────────────────────────
 async function triggerTick() {
@@ -350,6 +425,46 @@ function hideShortcutsModal() {
     </div>
   </div>
 </div>
+<!-- Modal historique notifications -->
+<div id="notif-history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-start;justify-content:flex-end;padding:1rem;" onclick="if(event.target===this)toggleNotifHistory()">
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:12px;width:340px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.3);margin-top:3rem;">
+    <div style="padding:.8rem 1.2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:.9rem;">📋 Historique notifications</strong>
+      <div style="display:flex;gap:.5rem;">
+        <button onclick="_notifHistory=[];localStorage.removeItem('notif_history');updateNotifBadge();renderNotifHistory();" style="background:none;border:none;color:var(--muted,#999);cursor:pointer;font-size:.8rem;">Effacer</button>
+        <button onclick="toggleNotifHistory()" style="background:none;border:none;color:var(--muted,#999);cursor:pointer;font-size:1rem;">✕</button>
+      </div>
+    </div>
+    <div id="notif-history-list" style="overflow-y:auto;flex:1;padding:.5rem 0;"></div>
+  </div>
+</div>
+
+<script>
+function toggleNotifHistory() {
+  const m = document.getElementById('notif-history-modal');
+  const isOpen = m.style.display === 'flex';
+  m.style.display = isOpen ? 'none' : 'flex';
+  if (!isOpen) renderNotifHistory();
+}
+function renderNotifHistory() {
+  const list = document.getElementById('notif-history-list');
+  if (!_notifHistory.length) {
+    list.innerHTML = '<div style="text-align:center;padding:1.5rem;color:var(--muted,#999);font-size:.85rem;">Aucune notification</div>';
+    return;
+  }
+  const colors = { CRITICAL: '#e74c3c', WARNING: '#f39c12', NORMAL: '#27ae60' };
+  list.innerHTML = _notifHistory.map(n => `
+    <div style="padding:.6rem 1.2rem;border-bottom:1px solid var(--border);font-size:.82rem;">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.2rem;">
+        <span style="color:${colors[n.level]||'#999'};font-weight:700;font-size:.75rem;">${n.level}</span>
+        <span style="color:var(--muted,#999);font-size:.72rem;margin-left:auto;">${n.time}</span>
+      </div>
+      <div style="font-weight:600;">${n.title}</div>
+      <div style="color:var(--muted,#999);">${n.body}</div>
+    </div>`).join('');
+}
+</script>
+
 {% block scripts %}{% endblock %}
 </body>
 </html>

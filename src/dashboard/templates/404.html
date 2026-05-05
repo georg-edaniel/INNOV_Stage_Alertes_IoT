@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% set active = "" %}
+{% block title %}Page introuvable{% endblock %}
+
+{% block content %}
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:2rem;">
+
+  <div style="font-size:6rem;line-height:1;margin-bottom:1rem;filter:grayscale(.3);">🔍</div>
+
+  <div style="font-size:5rem;font-weight:900;color:var(--primary);line-height:1;margin-bottom:.5rem;">404</div>
+  <h1 style="font-size:1.4rem;font-weight:700;margin-bottom:.8rem;color:var(--text);">Page introuvable</h1>
+  <p style="color:var(--muted);font-size:.95rem;max-width:400px;margin-bottom:2rem;line-height:1.6;">
+    La page que vous cherchez n'existe pas ou a été déplacée.<br>
+    Vérifiez l'URL ou retournez au tableau de bord.
+  </p>
+
+  <div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;">
+    <a href="/" class="btn btn-primary" style="padding:.6rem 1.4rem;">
+      📊 Retour au Dashboard
+    </a>
+    <a href="/alerts" class="btn btn-outline" style="padding:.6rem 1.4rem;">
+      🔔 Voir les Alertes
+    </a>
+    <button onclick="history.back()" class="btn btn-outline" style="padding:.6rem 1.4rem;">
+      ← Page précédente
+    </button>
+  </div>
+
+  <div style="margin-top:3rem;padding:1rem 1.5rem;background:var(--card);border-radius:10px;border:1px solid var(--border);font-size:.82rem;color:var(--muted);max-width:420px;">
+    <strong>Liens rapides :</strong><br>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem;justify-content:center;">
+      <a href="/logs">📋 Historique</a>
+      <a href="/report">📄 Rapport</a>
+      <a href="/params">⚙️ Paramètres</a>
+      <a href="/map">🗺 Carte</a>
+      <a href="/audit">🛡 Audit</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -273,6 +273,31 @@
      ═══════════════════════════════════════════════════════ -->
 <div id="tab-capteurs" class="tab-pane">
 
+  <!-- Import données IoT réelles -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-header"><h3>📤 Import de données IoT réelles</h3></div>
+    <div class="card-body" style="padding:1.2rem;">
+      <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+        Importez des lectures capteurs depuis un fichier <strong>CSV</strong> ou <strong>JSON</strong>.
+        Chaque lecture est analysée et peut générer des alertes.
+      </p>
+      <div class="info-box" style="margin-bottom:1rem;">
+        <strong>Format CSV attendu :</strong><br>
+        <code style="font-size:.82rem;">sensor,value,unit</code><br>
+        <code style="font-size:.82rem;">temperature,28.5,°C</code><br>
+        <code style="font-size:.82rem;">ph,7.2,pH</code><br><br>
+        <strong>Format JSON attendu :</strong><br>
+        <code style="font-size:.82rem;">[{"sensor":"turbidity","value":45.1,"unit":"NTU"}]</code>
+      </div>
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <input type="file" id="iot-file" accept=".csv,.json"
+          style="border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;background:var(--bg);color:var(--text);font-size:.85rem;">
+        <button id="iot-import-btn" class="btn btn-primary" onclick="importIoT()">📤 Importer</button>
+      </div>
+      <div id="iot-result" style="margin-top:.8rem;font-size:.85rem;color:var(--success);min-height:1.2rem;"></div>
+    </div>
+  </div>
+
   <!-- Zones géographiques -->
   <div class="card" style="margin-bottom:1.5rem;">
     <div class="card-header"><h3>🗺 Zones géographiques</h3></div>
@@ -575,7 +600,7 @@ async function loadUsers(){
       <td style="padding:.4rem .6rem;">${info.display_name||'—'}</td>
       <td style="padding:.4rem .6rem;color:var(--muted);font-size:.82rem;">${info.email||'—'}</td>
       <td style="padding:.4rem .6rem;text-align:center;"><span style="font-weight:600;color:${rc[info.role]||'var(--text)'};">${info.role}</span></td>
-      <td style="padding:.4rem .6rem;text-align:center;"><a href="/profile" class="btn btn-outline btn-sm">✏️</a></td>
+      <td style="padding:.4rem .6rem;text-align:center;"><button class="btn btn-outline btn-sm" onclick="openEditUser('${u}','${info.display_name||''}','${info.email||''}','${info.phone||''}','${info.role}')">✏️ Modifier</button></td>
       <td style="padding:.4rem;text-align:center;"><button class="btn btn-danger btn-sm" onclick="deleteUser('${u}')">🗑</button></td>
     </tr>`;
   });
@@ -607,6 +632,34 @@ async function deleteUser(username){
   const res=await fetch(`/api/config/auth/users/${encodeURIComponent(username)}`,{method:'DELETE'});
   if(res.ok){document.getElementById('user-row-'+username)?.remove();showToast(`"${username}" supprimé`,'info');}
   else showToast('Erreur suppression','error');
+}
+
+// ── Édition utilisateur (admin) ──────────────────────────────────
+let _editUsername='';
+function openEditUser(u,display,email,phone,role){
+  _editUsername=u;
+  document.getElementById('eu-username-label').textContent=u;
+  document.getElementById('eu-display').value=display;
+  document.getElementById('eu-email').value=email;
+  document.getElementById('eu-phone').value=phone;
+  document.getElementById('eu-role').value=role;
+  document.getElementById('eu-pass').value='';
+  document.getElementById('edit-user-modal').style.display='flex';
+}
+function closeEditUser(){ document.getElementById('edit-user-modal').style.display='none'; }
+
+async function saveEditUser(){
+  const params=new URLSearchParams({
+    role:         document.getElementById('eu-role').value,
+    display_name: document.getElementById('eu-display').value.trim(),
+    email:        document.getElementById('eu-email').value.trim(),
+    phone:        document.getElementById('eu-phone').value.trim(),
+  });
+  const pass=document.getElementById('eu-pass').value;
+  if(pass) params.set('password',pass);
+  const res=await fetch(`/api/config/auth/users/${encodeURIComponent(_editUsername)}?`+params,{method:'PUT'});
+  if(res.ok){showToast(`"${_editUsername}" mis à jour`,'success');closeEditUser();loadUsers();}
+  else{const d=await res.json().catch(()=>({}));showToast(d.detail||'Erreur','error');}
 }
 
 (async()=>{await loadUsers();})();
@@ -674,5 +727,62 @@ async function deleteMW(id){
   if(r.ok){document.getElementById('mw-row-'+id)?.remove();showToast('Fenêtre supprimée','info');}
   else showToast('Erreur suppression','error');
 }
+// ── Import IoT ───────────────────────────────────────────────────
+async function importIoT(){
+  const fileInput=document.getElementById('iot-file');
+  if(!fileInput.files.length){showToast('Choisissez un fichier CSV ou JSON','warning');return;}
+  const form=new FormData();
+  form.append('file',fileInput.files[0]);
+  const btn=document.getElementById('iot-import-btn');
+  btn.disabled=true; btn.textContent='Import en cours…';
+  try{
+    const res=await fetch('/api/ingest/upload',{method:'POST',body:form});
+    const d=await res.json();
+    if(res.ok){
+      document.getElementById('iot-result').textContent=
+        `✅ ${d.imported} lectures importées · ${d.alerts_created} alerte(s) créée(s) · ${d.skipped} ignorées`;
+      showToast(`Import terminé : ${d.imported} lectures`,'success');
+      fileInput.value='';
+    } else { showToast(d.detail||'Erreur import','error'); }
+  }catch(e){showToast('Erreur : '+e.message,'error');}
+  finally{btn.disabled=false;btn.textContent='📤 Importer';}
+}
 </script>
+
+<!-- Modal édition utilisateur -->
+<div id="edit-user-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;" onclick="if(event.target===this)closeEditUser()">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;width:380px;max-width:95vw;box-shadow:0 16px 48px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 1rem;font-size:1rem;">✏️ Modifier : <span id="eu-username-label" style="color:var(--primary);"></span></h3>
+    <div style="display:grid;gap:.8rem;">
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:.3rem;">Rôle</label>
+        <select id="eu-role" style="width:100%;padding:.4rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+          <option value="admin">admin</option>
+          <option value="operator">operator</option>
+          <option value="viewer">viewer</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:.3rem;">Nom affiché</label>
+        <input id="eu-display" type="text" style="width:100%;padding:.4rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:.3rem;">Email</label>
+        <input id="eu-email" type="email" style="width:100%;padding:.4rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:.3rem;">Téléphone</label>
+        <input id="eu-phone" type="tel" style="width:100%;padding:.4rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+      </div>
+      <div>
+        <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:.3rem;">Nouveau mot de passe (laisser vide = inchangé)</label>
+        <input id="eu-pass" type="password" placeholder="••••••••" style="width:100%;padding:.4rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);">
+      </div>
+      <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:.4rem;">
+        <button class="btn btn-outline btn-sm" onclick="closeEditUser()">Annuler</button>
+        <button class="btn btn-primary btn-sm" onclick="saveEditUser()">💾 Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
