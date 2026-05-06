@@ -1,131 +1,188 @@
 {% extends "base.html" %}
 {% set active = "dashboard" %}
-
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<h1 class="page-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
-  <span><span class="live-dot"></span>Dashboard — Monitoring IoT</span>
-  <span id="live-status" style="font-size:.8rem;font-weight:400;color:#27ae60;">⬤ Connexion en cours...</span>
-</h1>
 
-<!-- KPIs alertes -->
-<div class="kpi-grid">
-  <div class="kpi-card critical">
-    <div class="kpi-label">Alertes critiques</div>
-    <div class="kpi-value">{{ stats.critical }}</div>
-    <div class="kpi-sub">{{ open.critical }} ouvertes</div>
-  </div>
-  <div class="kpi-card warning">
-    <div class="kpi-label">Avertissements</div>
-    <div class="kpi-value">{{ stats.warning }}</div>
-    <div class="kpi-sub">{{ open.warning }} ouvertes</div>
-  </div>
-  <div class="kpi-card success">
-    <div class="kpi-label">Résolues</div>
-    <div class="kpi-value">{{ stats.resolved }}</div>
-    <div class="kpi-sub">sur {{ stats.total }} au total</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-label">Acquittées</div>
-    <div class="kpi-value">{{ stats.acknowledged }}</div>
-    <div class="kpi-sub">opérateur notifié</div>
+<!-- ══ TITRE ════════════════════════════════════════════════════ -->
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:1.2rem;">
+  <h1 class="page-title" style="margin:0;">
+    <span class="live-dot"></span> Dashboard — Monitoring IoT
+  </h1>
+  <div style="display:flex;align-items:center;gap:1rem;">
+    <span id="live-status" style="font-size:.8rem;font-weight:600;color:var(--success);">⬤ Connexion...</span>
+    <a href="/presentation" target="_blank" class="btn btn-outline btn-sm">🖥 Présentation</a>
   </div>
 </div>
 
-<!-- KPIs MTTR -->
-<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
-  {% for sensor, label, icon in [('temperature','Température','🌡'),('turbidity','Turbidité','💧'),('ph','pH','⚗')] %}
-  <div class="kpi-card">
-    <div class="kpi-label">{{ icon }} MTTR — {{ label }}</div>
-    <div class="kpi-value" style="font-size:1.4rem;">
+<!-- ══ BANDEAU STATUT GLOBAL ════════════════════════════════════ -->
+<div id="status-banner" style="
+  border-radius:10px;padding:.7rem 1.2rem;margin-bottom:1.2rem;
+  display:flex;align-items:center;gap:.8rem;font-weight:600;font-size:.9rem;
+  background:#d5f5e3;border-left:4px solid #27ae60;color:#1e8449;transition:all .4s;">
+  <span style="font-size:1.2rem;">✅</span>
+  <span id="status-text">Tous les capteurs fonctionnent normalement</span>
+  <span id="status-time" style="margin-left:auto;font-weight:400;font-size:.78rem;opacity:.7;"></span>
+</div>
+
+<!-- ══ LIGNE 1 — KPIs ALERTES + MTTR ════════════════════════════ -->
+<div style="display:grid;grid-template-columns:repeat(3,1fr) 1px repeat(3,1fr);gap:.8rem;margin-bottom:1.2rem;align-items:stretch;">
+
+  <!-- Alertes -->
+  <div class="kpi-card critical">
+    <div class="kpi-label">🔴 Critiques</div>
+    <div class="kpi-value" id="kpi-critical">{{ stats.critical }}</div>
+    <div class="kpi-sub"><span id="kpi-open-critical">{{ open.critical }}</span> ouvertes</div>
+  </div>
+  <div class="kpi-card warning">
+    <div class="kpi-label">🟡 Avertissements</div>
+    <div class="kpi-value" id="kpi-warning">{{ stats.warning }}</div>
+    <div class="kpi-sub"><span id="kpi-open-warning">{{ open.warning }}</span> ouvertes</div>
+  </div>
+  <div class="kpi-card success">
+    <div class="kpi-label">✅ Résolues</div>
+    <div class="kpi-value" id="kpi-resolved">{{ stats.resolved }}</div>
+    <div class="kpi-sub">sur <span id="kpi-total">{{ stats.total }}</span> totales</div>
+  </div>
+
+  <!-- Séparateur vertical -->
+  <div style="background:var(--border);width:1px;margin:.5rem 0;"></div>
+
+  <!-- MTTR -->
+  {% for sensor, label, icon in [('temperature','Temp.','🌡'),('turbidity','Turbid.','💧'),('ph','pH','⚗')] %}
+  <div class="kpi-card" style="border-left-color:var(--primary);">
+    <div class="kpi-label">{{ icon }} MTTR {{ label }}</div>
+    <div class="kpi-value" style="font-size:1.3rem;" id="kpi-mttr-{{ sensor }}">
       {% if mttr[sensor] %}
         {% set s = mttr[sensor] | int %}
         {% if s < 60 %}{{ s }}s
-        {% elif s < 3600 %}{{ (s // 60) }}m {{ (s % 60) }}s
-        {% else %}{{ (s // 3600) }}h {{ ((s % 3600) // 60) }}m{% endif %}
+        {% elif s < 3600 %}{{ s // 60 }}m
+        {% else %}{{ s // 3600 }}h{{ (s % 3600) // 60 }}m{% endif %}
       {% else %}—{% endif %}
     </div>
-    <div class="kpi-sub">temps moyen de résolution</div>
+    <div class="kpi-sub">rés. moyen</div>
   </div>
   {% endfor %}
+
 </div>
 
-<!-- Jauges capteurs -->
-<div class="chart-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
-  <div class="chart-card">
-    <div class="chart-title">🌡 Température</div>
-    <div style="position:relative;height:140px;"><canvas id="gaugeTemp"></canvas></div>
-    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-temperature">—</div>
-    <div style="text-align:center;font-size:.75rem;color:var(--muted);">°C · normale : 15–25</div>
+<!-- ══ LIGNE 2 — CAPTEURS (jauge + valeur + badge) ══════════════ -->
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin-bottom:1.2rem;">
+
+  {% set sensors_meta = [
+    ('temperature','🌡','Température','°C',  0,  50, 15, 25),
+    ('turbidity',  '💧','Turbidité',  'NTU', 0, 100,  0, 10),
+    ('ph',         '⚗', 'pH',         '',    0,  14,6.5,8.5),
+  ] %}
+
+  {% for sensor, icon, label, unit, vmin, vmax, nmin, nmax in sensors_meta %}
+  {% set h = health.get(sensor, {}) %}
+  {% set lvl = h.get('level','unknown') | lower %}
+  <div class="chart-card" id="sensor-card-{{ sensor }}" style="
+    border-left: 4px solid
+    {% if lvl == 'critical' %}var(--critical)
+    {% elif lvl == 'warning' %}var(--warning)
+    {% else %}var(--success){% endif %};
+    transition: border-color .4s;">
+
+    <!-- En-tête capteur -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
+      <div class="chart-title" style="margin:0;">{{ icon }} {{ label }}</div>
+      <span class="badge badge-{{ lvl }}" id="sensor-badge-{{ sensor }}">
+        {{ h.get('level','—') }}
+      </span>
+    </div>
+
+    <!-- Jauge doughnut -->
+    <div style="position:relative;height:120px;">
+      <canvas id="gauge-{{ sensor }}"></canvas>
+    </div>
+
+    <!-- Valeur + unité -->
+    <div style="text-align:center;margin-top:.3rem;">
+      <span style="font-size:1.6rem;font-weight:800;font-variant-numeric:tabular-nums;" id="gauge-val-{{ sensor }}">
+        {{ "%.2f"|format(h.value) if h.value is not none else '—' }}
+      </span>
+      <span style="font-size:.85rem;color:var(--muted);margin-left:.2rem;">{{ unit }}</span>
+    </div>
+
+    <!-- Plage normale -->
+    <div style="text-align:center;font-size:.72rem;color:var(--muted);margin-top:.2rem;">
+      Normale : {{ nmin }} – {{ nmax }} {{ unit }}
+    </div>
+
+    <!-- Dernière lecture -->
+    <div style="text-align:center;font-size:.7rem;color:var(--muted);margin-top:.15rem;" id="sensor-last-{{ sensor }}">
+      {% if h.get('last_seen') %}{{ h.last_seen[:19].replace('T',' ') }}{% else %}—{% endif %}
+    </div>
+
   </div>
-  <div class="chart-card">
-    <div class="chart-title">💧 Turbidité</div>
-    <div style="position:relative;height:140px;"><canvas id="gaugeTurb"></canvas></div>
-    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-turbidity">—</div>
-    <div style="text-align:center;font-size:.75rem;color:var(--muted);">NTU · normale : 0–10</div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title">⚗ pH</div>
-    <div style="position:relative;height:140px;"><canvas id="gaugePh"></canvas></div>
-    <div style="text-align:center;font-size:1.3rem;font-weight:700;margin-top:-.5rem;" id="gauge-val-ph">—</div>
-    <div style="text-align:center;font-size:.75rem;color:var(--muted);">pH · normale : 6.5–8.5</div>
-  </div>
+  {% endfor %}
+
 </div>
 
-<!-- Graphiques -->
-<div class="chart-grid">
+<!-- ══ LIGNE 3 — GRAPHIQUES + SIMULATEUR ════════════════════════ -->
+<div style="display:grid;grid-template-columns:1fr 1fr 300px;gap:.8rem;margin-bottom:1.2rem;align-items:start;">
+
+  <!-- Donut répartition -->
   <div class="chart-card">
     <div class="chart-title">Répartition des alertes</div>
     <div class="chart-wrap"><canvas id="chartPie"></canvas></div>
   </div>
+
+  <!-- Barres dernières lectures -->
   <div class="chart-card">
-    <div class="chart-title">Capteurs — dernières lectures</div>
+    <div class="chart-title">Dernières lectures capteurs</div>
     <div class="chart-wrap"><canvas id="chartBar"></canvas></div>
   </div>
+
+  <!-- Simulateur compact -->
+  <div class="chart-card" style="padding:1rem;">
+    <div class="chart-title" style="margin-bottom:.8rem;">🎛 Simulateur</div>
+
+    <!-- Statut -->
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem;">
+      <span id="sim-dot" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;"></span>
+      <span id="sim-label" style="font-size:.85rem;font-weight:600;">Chargement…</span>
+    </div>
+    <div style="display:flex;gap:.4rem;margin-bottom:.8rem;">
+      <button id="btn-start" class="btn btn-success btn-sm" onclick="simStart()" style="display:none;flex:1;">▶ Marche</button>
+      <button id="btn-stop"  class="btn btn-danger  btn-sm" onclick="simStop()"  style="display:none;flex:1;">⏹ Arrêt</button>
+    </div>
+
+    <!-- Probabilité -->
+    <div style="margin-bottom:.8rem;">
+      <label style="font-size:.75rem;font-weight:600;color:var(--muted);display:block;margin-bottom:.3rem;">
+        Probabilité d'anomalie : <span id="prob-val" style="color:var(--text);">20 %</span>
+      </label>
+      <input type="range" id="prob-slider" class="range-input" min="0" max="1" step="0.05" value="0.20"
+        oninput="updateProb(this.value)" style="width:100%;">
+      <button class="btn btn-primary btn-sm" onclick="applyProb()" style="width:100%;margin-top:.4rem;">Appliquer</button>
+    </div>
+
+    <!-- Injection -->
+    <div style="font-size:.75rem;font-weight:600;color:var(--muted);margin-bottom:.4rem;">Injecter anomalie :</div>
+    <div style="display:flex;flex-direction:column;gap:.3rem;">
+      <button class="btn btn-warning btn-sm" onclick="injectTick('temperature')" style="width:100%;justify-content:center;">🌡 Température</button>
+      <button class="btn btn-warning btn-sm" onclick="injectTick('turbidity')"   style="width:100%;justify-content:center;">💧 Turbidité</button>
+      <button class="btn btn-warning btn-sm" onclick="injectTick('ph')"          style="width:100%;justify-content:center;">⚗ pH</button>
+    </div>
+
+    <div id="sim-msg" style="font-size:.75rem;color:var(--muted);margin-top:.6rem;min-height:1rem;"></div>
+  </div>
+
 </div>
 
-<!-- Contrôles simulateur -->
-<div class="sim-controls">
-  <h3>🎛 Contrôle du simulateur</h3>
-
-  <!-- Marche / Arrêt -->
-  <div class="range-row">
-    <label>État</label>
-    <div style="display:flex;align-items:center;gap:.8rem;">
-      <span id="sim-state-dot" style="width:12px;height:12px;border-radius:50%;background:#ccc;display:inline-block;transition:background .3s;"></span>
-      <span id="sim-state-label" style="font-size:.88rem;font-weight:600;">Chargement…</span>
-      <button id="btn-start" class="btn btn-success btn-sm" onclick="simStart()" style="display:none;">▶ Marche</button>
-      <button id="btn-stop"  class="btn btn-danger  btn-sm" onclick="simStop()"  style="display:none;">⏹ Arrêt</button>
-    </div>
-  </div>
-
-  <!-- Probabilité d'anomalie -->
-  <div class="range-row">
-    <label>Probabilité d'anomalie</label>
-    <input type="range" id="prob-slider" class="range-input" min="0" max="1" step="0.05" value="0.20" oninput="updateProb(this.value)">
-    <span class="range-value" id="prob-val">20 %</span>
-    <button class="btn btn-primary btn-sm" onclick="applyProb()">Appliquer</button>
-  </div>
-
-  <!-- Injection manuelle -->
-  <div class="range-row" style="margin-bottom:0;">
-    <label>Injecter une anomalie</label>
-    <div class="btn-group">
-      <button class="btn btn-warning btn-sm" onclick="injectTick('temperature')">🌡 Température</button>
-      <button class="btn btn-warning btn-sm" onclick="injectTick('turbidity')">💧 Turbidité</button>
-      <button class="btn btn-warning btn-sm" onclick="injectTick('ph')">⚗ pH</button>
-    </div>
-  </div>
-
-  <div id="sim-msg" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;min-height:1rem;"></div>
-</div>
-
-<!-- Alertes ouvertes récentes -->
+<!-- ══ LIGNE 4 — ALERTES RÉCENTES ═══════════════════════════════ -->
 <div class="card">
   <div class="card-header">
     <h3>🔔 Alertes ouvertes récentes</h3>
-    <a href="/alerts" class="btn btn-outline btn-sm">Voir tout</a>
+    <div style="display:flex;gap:.5rem;align-items:center;">
+      <span id="open-count-badge" style="background:rgba(231,76,60,.12);color:var(--critical);border:1px solid rgba(231,76,60,.25);border-radius:20px;padding:.15rem .65rem;font-size:.75rem;font-weight:700;">
+        {{ open.critical + open.warning }} ouvertes
+      </span>
+      <a href="/alerts" class="btn btn-outline btn-sm">Voir tout →</a>
+    </div>
   </div>
   <div class="card-body">
     {% if recent_alerts %}
@@ -135,10 +192,9 @@
         <col style="width:110px;">
         <col style="width:90px;">
         <col style="width:90px;">
-        <col style="width:75px;">
-        <col><!-- Raison — prend le reste -->
-        <col style="width:130px;">
-        <col style="width:150px;">
+        <col>
+        <col style="width:135px;">
+        <col style="width:160px;">
       </colgroup>
       <thead>
         <tr>
@@ -146,7 +202,6 @@
           <th>Capteur</th>
           <th>Valeur</th>
           <th>Niveau</th>
-          <th>Méthode</th>
           <th>Raison</th>
           <th>Date</th>
           <th style="text-align:center;">Actions</th>
@@ -156,12 +211,11 @@
         {% for a in recent_alerts %}
         <tr>
           <td style="text-align:center;"><a href="/alerts/{{ a.id }}">{{ a.id }}</a></td>
-          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>{{ a.sensor }}</b></td>
+          <td><b>{{ a.sensor }}</b></td>
           <td style="white-space:nowrap;">{{ a.value }} {{ a.unit }}</td>
           <td><span class="badge badge-{{ a.level | lower }}">{{ a.level }}</span></td>
-          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ a.method }}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ a.reason }}">{{ a.reason }}</td>
-          <td style="white-space:nowrap;font-size:.78rem;color:var(--muted);">{{ a.created_at[:19] | replace('T',' ') }}</td>
+          <td style="white-space:nowrap;font-size:.78rem;color:var(--muted);">{{ a.created_at[:19].replace('T',' ') }}</td>
           <td style="white-space:nowrap;text-align:center;">
             {% if not a.acknowledged %}
             <button class="btn btn-sm btn-outline" onclick="ackAlert({{ a.id }}, this)">Acquitter</button>
@@ -173,259 +227,263 @@
       </tbody>
     </table>
     {% else %}
-    <div class="empty">✅ Aucune alerte ouverte</div>
+    <div class="empty">✅ Aucune alerte ouverte en ce moment</div>
     {% endif %}
   </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-// ── Jauges capteurs ────────────────────────────────────────────
-const _gaugeConfig = {
-  temperature: { min: 0,  max: 50,  warn: [25, 35], crit: [35, 50], normalMin: 15, normalMax: 25, unit: '°C', id: 'gaugeTemp',  valId: 'gauge-val-temperature' },
-  turbidity:   { min: 0,  max: 100, warn: [10, 25], crit: [25,100], normalMin: 0,  normalMax: 10, unit: 'NTU', id: 'gaugeTurb', valId: 'gauge-val-turbidity'   },
-  ph:          { min: 0,  max: 14,  warn: [8.5,10], crit: [10, 14], normalMin: 6.5,normalMax: 8.5,unit: '',    id: 'gaugePh',   valId: 'gauge-val-ph'          },
+// ── Config jauges ───────────────────────────────────────────────
+const _gaugeCfg = {
+  temperature: { min:0, max:50,  warn:25, crit:35, unit:'°C',  id:'gauge-temperature', valId:'gauge-val-temperature' },
+  turbidity:   { min:0, max:100, warn:10, crit:25, unit:'NTU', id:'gauge-turbidity',   valId:'gauge-val-turbidity'   },
+  ph:          { min:0, max:14,  warn:8.5,crit:10, unit:'',    id:'gauge-ph',          valId:'gauge-val-ph'          },
 };
-const _gaugeInstances = {};
+const _gaugeInst = {};
 
-function _makeGauge(cfg, value) {
-  const pct   = Math.min(1, Math.max(0, (value - cfg.min) / (cfg.max - cfg.min)));
-  const color = value >= cfg.crit[0] ? '#e74c3c' : value >= cfg.warn[0] ? '#f39c12' : '#27ae60';
-  const normPct  = (cfg.normalMax - cfg.min) / (cfg.max - cfg.min);
-  const warnPct  = (cfg.warn[0]   - cfg.min) / (cfg.max - cfg.min);
-  const critPct  = (cfg.crit[0]   - cfg.min) / (cfg.max - cfg.min);
-
-  return {
-    type: 'doughnut',
-    data: {
-      datasets: [
-        // Fond de la jauge (zones colorées)
-        {
-          data: [normPct, warnPct - normPct, critPct - warnPct, 1 - critPct],
-          backgroundColor: ['#27ae6044','#f39c1244','#e74c3c44','#00000022'],
-          borderWidth: 0, cutout: '70%',
-        },
-        // Aiguille / valeur
-        {
-          data: [pct, 1 - pct],
-          backgroundColor: [color, 'transparent'],
-          borderWidth: 0, cutout: '75%',
-        }
-      ]
-    },
-    options: {
-      rotation: -90, circumference: 180,
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      animation: { duration: 400 },
-    }
-  };
+function _gaugeColor(cfg, val) {
+  return val >= cfg.crit ? '#e74c3c' : val >= cfg.warn ? '#f39c12' : '#27ae60';
+}
+function _gaugePct(cfg, val) {
+  return Math.min(1, Math.max(0, (val - cfg.min) / (cfg.max - cfg.min)));
 }
 
 function initGauges() {
   fetch('/api/sensors/health').then(r => r.json()).then(h => {
-    for (const [sensor, cfg] of Object.entries(_gaugeConfig)) {
-      const info  = h[sensor];
-      const val   = info && info.value !== null ? info.value : cfg.min;
-      const chart = new Chart(document.getElementById(cfg.id), _makeGauge(cfg, val));
-      _gaugeInstances[sensor] = { chart, cfg };
-      document.getElementById(cfg.valId).textContent = info && info.value !== null
-        ? `${info.value} ${cfg.unit}` : '—';
+    for (const [sensor, cfg] of Object.entries(_gaugeCfg)) {
+      const info  = h[sensor] || {};
+      const val   = info.value !== null && info.value !== undefined ? info.value : cfg.min;
+      const color = _gaugeColor(cfg, val);
+      const pct   = _gaugePct(cfg, val);
+      const normPct = (cfg.warn - cfg.min) / (cfg.max - cfg.min);
+      const warnPct = (cfg.crit - cfg.min) / (cfg.max - cfg.min);
+
+      const chart = new Chart(document.getElementById(cfg.id), {
+        type: 'doughnut',
+        data: { datasets: [
+          { data: [normPct, warnPct-normPct, 1-warnPct],
+            backgroundColor: ['#27ae6030','#f39c1230','#e74c3c30'], borderWidth:0, cutout:'68%' },
+          { data: [pct, 1-pct],
+            backgroundColor: [color, 'rgba(0,0,0,0)'], borderWidth:0, cutout:'73%' },
+        ]},
+        options: { rotation:-90, circumference:180, responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{display:false}, tooltip:{enabled:false} }, animation:{duration:500} },
+      });
+      _gaugeInst[sensor] = { chart, cfg };
+
+      if (info.value !== null && info.value !== undefined) {
+        document.getElementById(cfg.valId).textContent = parseFloat(info.value).toFixed(2);
+      }
     }
   }).catch(() => {});
 }
 initGauges();
 
 function updateGauge(sensor, value) {
-  const inst = _gaugeInstances[sensor];
+  const inst = _gaugeInst[sensor];
   if (!inst) return;
   const { chart, cfg } = inst;
-  const pct   = Math.min(1, Math.max(0, (value - cfg.min) / (cfg.max - cfg.min)));
-  const color = value >= cfg.crit[0] ? '#e74c3c' : value >= cfg.warn[0] ? '#f39c12' : '#27ae60';
-  chart.data.datasets[1].data             = [pct, 1 - pct];
-  chart.data.datasets[1].backgroundColor  = [color, 'transparent'];
+  const pct   = _gaugePct(cfg, value);
+  const color = _gaugeColor(cfg, value);
+  chart.data.datasets[1].data            = [pct, 1-pct];
+  chart.data.datasets[1].backgroundColor = [color, 'rgba(0,0,0,0)'];
   chart.update('active');
-  document.getElementById(cfg.valId).textContent = `${Math.round(value * 100) / 100} ${cfg.unit}`;
+  document.getElementById(cfg.valId).textContent = parseFloat(value).toFixed(2);
 }
 
-// ── Graphique Donut ────────────────────────────────────────────
-new Chart(document.getElementById('chartPie'), {
+// ── Statut capteur (carte + badge) ─────────────────────────────
+function updateSensorCard(sensor, info) {
+  const lvl   = (info.level || 'unknown').toLowerCase();
+  const card  = document.getElementById('sensor-card-' + sensor);
+  const badge = document.getElementById('sensor-badge-' + sensor);
+  const last  = document.getElementById('sensor-last-' + sensor);
+  if (card) {
+    const borderColors = { critical:'var(--critical)', warning:'var(--warning)', normal:'var(--success)', unknown:'var(--border)' };
+    card.style.borderLeftColor = borderColors[lvl] || 'var(--border)';
+  }
+  if (badge) {
+    badge.textContent  = info.level || '—';
+    badge.className    = 'badge badge-' + lvl;
+  }
+  if (last && info.last_seen) {
+    last.textContent = info.last_seen.slice(0,19).replace('T',' ');
+  }
+}
+
+// ── Bandeau statut global ───────────────────────────────────────
+function updateBanner(stats, open) {
+  const banner = document.getElementById('status-banner');
+  const text   = document.getElementById('status-text');
+  const time   = document.getElementById('status-time');
+  time.textContent = new Date().toLocaleTimeString('fr-FR');
+  if ((open.critical || 0) > 0) {
+    banner.style.cssText = banner.style.cssText.replace(/background:[^;]+/, 'background:#fdedec').replace(/border-left:[^;]+/, 'border-left:4px solid var(--critical)').replace(/color:[^;]+/, 'color:#c0392b');
+    banner.style.background = '#fdedec'; banner.style.borderLeftColor = 'var(--critical)'; banner.style.color = '#c0392b';
+    text.textContent = `🚨 ${open.critical} alerte(s) critique(s) ouverte(s) — intervention requise`;
+  } else if ((open.warning || 0) > 0) {
+    banner.style.background = '#fef9e7'; banner.style.borderLeftColor = 'var(--warning)'; banner.style.color = '#d68910';
+    text.textContent = `⚠️ ${open.warning} avertissement(s) ouvert(s) — à surveiller`;
+  } else {
+    banner.style.background = '#d5f5e3'; banner.style.borderLeftColor = '#27ae60'; banner.style.color = '#1e8449';
+    text.textContent = '✅ Tous les capteurs fonctionnent normalement';
+  }
+}
+updateBanner({ critical: {{ open.critical }}, warning: {{ open.warning }} }, { critical: {{ open.critical }}, warning: {{ open.warning }} });
+
+// ── Graphique Donut ─────────────────────────────────────────────
+const pieChart = new Chart(document.getElementById('chartPie'), {
   type: 'doughnut',
   data: {
     labels: ['Résolues', 'Warning', 'Critical'],
-    datasets: [{
-      data: [{{ stats.resolved }}, {{ stats.warning }}, {{ stats.critical }}],
-      backgroundColor: ['#27ae60', '#f39c12', '#e74c3c'],
-      borderWidth: 2,
-    }]
+    datasets: [{ data: [{{ stats.resolved }}, {{ stats.warning }}, {{ stats.critical }}],
+      backgroundColor: ['#27ae60', '#f39c12', '#e74c3c'], borderWidth: 2 }]
   },
-  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+  options: { responsive:true, maintainAspectRatio:false,
+    plugins: { legend: { position:'bottom', labels:{ boxWidth:12, padding:10, font:{size:11} } } } }
 });
 
-// ── Graphique Barres ───────────────────────────────────────────
-let barChartInstance = null;
-const sensorBuffers = { temperature: [], turbidity: [], ph: [] };
+// ── Graphique Barres ────────────────────────────────────────────
+let barChart = null;
+const sensorBufs = { temperature:[], turbidity:[], ph:[] };
 
 async function loadBarChart() {
   const r    = await fetch('/api/logs?limit=30');
   const data = await r.json();
-  const logs = data.logs;
-  const sensors = ['temperature', 'turbidity', 'ph'];
-  const colors  = { temperature: '#1a5c9c', turbidity: '#8e44ad', ph: '#16a085' };
-  const datasets = sensors.map(s => ({
-    label: s,
-    data: logs.filter(l => l.sensor === s).slice(0, 10).map(l => l.value),
-    backgroundColor: colors[s] + '99',
-    borderColor: colors[s],
-    borderWidth: 1,
+  const logs = data.logs || [];
+  const colors = { temperature:'#1a5c9c', turbidity:'#8e44ad', ph:'#16a085' };
+  const datasets = Object.entries(colors).map(([s, c]) => ({
+    label: s, data: logs.filter(l => l.sensor === s).slice(0,10).map(l => l.value),
+    backgroundColor: c + '99', borderColor: c, borderWidth: 1,
   }));
-  barChartInstance = new Chart(document.getElementById('chartBar'), {
+  barChart = new Chart(document.getElementById('chartBar'), {
     type: 'bar',
-    data: { labels: Array.from({length: 10}, (_, i) => `T-${9-i}`), datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
-      scales: { y: { beginAtZero: false } }
-    }
+    data: { labels: Array.from({length:10}, (_,i) => `T-${9-i}`), datasets },
+    options: { responsive:true, maintainAspectRatio:false,
+      plugins: { legend: { position:'bottom', labels:{ boxWidth:12, padding:8, font:{size:11} } } },
+      scales: { y: { beginAtZero:false } } }
   });
 }
 loadBarChart();
 
 function updateBarChart(readings) {
-  if (!barChartInstance) return;
+  if (!barChart || !readings) return;
   readings.forEach(r => {
-    const buf = sensorBuffers[r.sensor];
-    if (buf) { buf.push(r.value); if (buf.length > 10) buf.shift(); }
+    const buf = sensorBufs[r.sensor];
+    if (!buf) return;
+    buf.push(r.value);
+    if (buf.length > 10) buf.shift();
   });
-  barChartInstance.data.datasets.forEach(ds => {
-    ds.data = [...(sensorBuffers[ds.label] || [])];
-  });
-  barChartInstance.update('none');
+  barChart.data.datasets.forEach(ds => { ds.data = [...(sensorBufs[ds.label] || [])]; });
+  barChart.update('none');
 }
 
-// ── Actions alertes ────────────────────────────────────────────
+// ── Actions alertes ─────────────────────────────────────────────
 async function ackAlert(id, btn) {
-  await fetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' });
-  btn.disabled = true; btn.textContent = 'Acquitté';
+  await fetch(`/api/alerts/${id}/acknowledge`, { method:'PATCH' });
+  btn.disabled = true; btn.textContent = '✓ Acquitté';
 }
 async function resolveAlert(id, btn) {
-  await fetch(`/api/alerts/${id}/resolve`, { method: 'PATCH' });
-  btn.closest('tr').style.opacity = '.4';
-  setTimeout(() => location.reload(), 600);
+  await fetch(`/api/alerts/${id}/resolve`, { method:'PATCH' });
+  const tr = btn.closest('tr');
+  tr.style.transition = 'opacity .4s'; tr.style.opacity = '.35';
+  setTimeout(() => location.reload(), 700);
 }
 
-// ── Marche / Arrêt simulateur ──────────────────────────────────
+// ── Simulateur ──────────────────────────────────────────────────
 function _setSimUI(running) {
-  const dot   = document.getElementById('sim-state-dot');
-  const label = document.getElementById('sim-state-label');
-  const btnStart = document.getElementById('btn-start');
-  const btnStop  = document.getElementById('btn-stop');
-  dot.style.background   = running ? '#27ae60' : '#e74c3c';
-  label.textContent      = running ? 'En marche' : 'Arrêté';
-  label.style.color      = running ? 'var(--success)' : 'var(--critical)';
-  btnStart.style.display = running ? 'none' : '';
-  btnStop.style.display  = running ? '' : 'none';
+  document.getElementById('sim-dot').style.background   = running ? '#27ae60' : '#e74c3c';
+  document.getElementById('sim-label').textContent      = running ? 'En marche' : 'Arrêté';
+  document.getElementById('sim-label').style.color      = running ? 'var(--success)' : 'var(--critical)';
+  document.getElementById('btn-start').style.display    = running ? 'none' : 'block';
+  document.getElementById('btn-stop').style.display     = running ? 'block' : 'none';
 }
-
-async function loadSimStatus() {
-  const r = await fetch('/api/simulator/status');
-  const d = await r.json();
-  _setSimUI(d.running);
-}
-
 async function simStart() {
-  const msg = document.getElementById('sim-msg');
-  const r   = await fetch('/api/simulator/start', { method: 'POST' });
-  const d   = await r.json();
+  const d = await fetch('/api/simulator/start', {method:'POST'}).then(r => r.json());
   _setSimUI(d.running);
-  msg.textContent = '▶ ' + d.message;
-  setTimeout(() => msg.textContent = '', 3000);
+  const msg = document.getElementById('sim-msg');
+  msg.textContent = '▶ ' + d.message; setTimeout(() => msg.textContent='', 3000);
 }
-
 async function simStop() {
-  const msg = document.getElementById('sim-msg');
-  const r   = await fetch('/api/simulator/stop', { method: 'POST' });
-  const d   = await r.json();
+  const d = await fetch('/api/simulator/stop', {method:'POST'}).then(r => r.json());
   _setSimUI(d.running);
-  msg.textContent = '⏹ ' + d.message;
-  setTimeout(() => msg.textContent = '', 3000);
-}
-
-loadSimStatus();
-
-// ── Contrôles simulateur ───────────────────────────────────────
-function updateProb(v) {
-  document.getElementById('prob-val').textContent = Math.round(v * 100) + ' %';
-}
-async function applyProb() {
-  const v   = document.getElementById('prob-slider').value;
   const msg = document.getElementById('sim-msg');
-  await fetch(`/api/simulator/config?probability=${v}`, { method: 'POST' });
-  msg.textContent = `✓ Probabilité réglée à ${Math.round(v * 100)} %`;
-  setTimeout(() => msg.textContent = '', 3000);
+  msg.textContent = '⏹ ' + d.message; setTimeout(() => msg.textContent='', 3000);
+}
+fetch('/api/simulator/status').then(r => r.json()).then(d => _setSimUI(d.running)).catch(() => {});
+
+function updateProb(v) { document.getElementById('prob-val').textContent = Math.round(v*100)+' %'; }
+async function applyProb() {
+  const v = document.getElementById('prob-slider').value;
+  await fetch(`/api/simulator/config?probability=${v}`, {method:'POST'});
+  const msg = document.getElementById('sim-msg');
+  msg.textContent = `✓ Probabilité : ${Math.round(v*100)} %`; setTimeout(() => msg.textContent='', 3000);
 }
 async function injectTick(sensor) {
+  const d = await fetch(`/api/simulator/tick/${sensor}`, {method:'POST'}).then(r => r.json());
   const msg = document.getElementById('sim-msg');
-  const r   = await fetch(`/api/simulator/tick/${sensor}`, { method: 'POST' });
-  const d   = await r.json();
-  msg.textContent = d.alert ? `⚠ Alerte ${d.alert.level} créée sur ${sensor}` : `✓ ${sensor} : aucune anomalie`;
+  msg.textContent = d.alert ? `⚠ Alerte ${d.alert.level}` : `✓ ${sensor} OK`;
   setTimeout(() => location.reload(), 800);
 }
 
-// ── SSE temps réel ─────────────────────────────────────────────
-const es = new EventSource('/api/stream');
+// ── SSE temps réel ──────────────────────────────────────────────
+const _upd = (id, v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
 
-es.onopen = () => {
-  document.getElementById('live-status').textContent = '⬤ Connecté — temps réel actif';
-};
+function connectSSE() {
+  const es = new EventSource('/api/stream');
 
-es.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type === 'connected') {
-    document.getElementById('live-status').textContent = '⬤ Flux actif';
-    return;
-  }
-  if (data.type !== 'tick') return;
+  es.onopen = () => _upd('live-status', '⬤ Temps réel actif');
 
-  // KPIs alertes
-  const s = data.stats;
-  document.querySelectorAll('.kpi-value')[0].textContent = s.critical;
-  document.querySelectorAll('.kpi-value')[1].textContent = s.warning;
-  document.querySelectorAll('.kpi-value')[2].textContent = s.resolved;
-  document.querySelectorAll('.kpi-value')[3].textContent = s.acknowledged;
-  document.querySelectorAll('.kpi-sub')[0].textContent   = `${s.critical} ouvertes`;
-  document.querySelectorAll('.kpi-sub')[1].textContent   = `${s.warning} ouvertes`;
-  document.querySelectorAll('.kpi-sub')[2].textContent   = `sur ${s.total} au total`;
+  es.onerror = () => {
+    _upd('live-status', '⬤ Reconnexion...');
+    document.getElementById('live-status').style.color = 'var(--warning)';
+    es.close(); setTimeout(connectSSE, 3000);
+  };
 
-  // Santé capteurs dans sidebar
-  if (data.sensor_health) updateHealthUI(data.sensor_health);
+  es.onmessage = (e) => {
+    let data; try { data = JSON.parse(e.data); } catch { return; }
+    if (data.type !== 'tick') return;
 
-  // Notification + flash si nouvelle alerte
-  if (data.alerts && data.alerts.length > 0) {
-    const a     = data.alerts[0];
-    const color = a.level === 'CRITICAL' ? '#e74c3c' : '#f39c12';
-    document.body.style.boxShadow = `inset 0 0 0 3px ${color}`;
-    setTimeout(() => document.body.style.boxShadow = '', 1200);
-    addAlertRow(a);
-    sendNotification(`Alerte ${a.level} — ${a.sensor}`, a.reason, a.level);
-    // Mettre à jour le timer
-    _lastAlertTs = new Date(a.created_at);
-    updateTimerDisplay();
-  }
+    const s = data.stats || {};
+    _upd('kpi-critical', s.critical ?? '—');
+    _upd('kpi-warning',  s.warning  ?? '—');
+    _upd('kpi-resolved', s.resolved ?? '—');
+    _upd('kpi-total',    s.total    ?? '—');
+    _upd('kpi-open-critical', s.critical ?? 0);
+    _upd('kpi-open-warning',  s.warning  ?? 0);
 
-  updateBarChart(data.readings);
+    const totalOpen = (s.critical||0)+(s.warning||0);
+    _upd('open-count-badge', `${totalOpen} ouvertes`);
+    updateBanner(s, { critical: s.critical||0, warning: s.warning||0 });
 
-  // Mise à jour jauges
-  if (data.readings) {
-    data.readings.forEach(r => { if (_gaugeInstances[r.sensor]) updateGauge(r.sensor, r.value); });
-  }
-};
+    // Capteurs
+    if (data.sensor_health) {
+      for (const [sensor, info] of Object.entries(data.sensor_health)) {
+        updateSensorCard(sensor, info);
+        updateHealthUI({ [sensor]: info });
+        if (info.value !== null && info.value !== undefined) updateGauge(sensor, info.value);
+      }
+    }
 
-es.onerror = () => {
-  document.getElementById('live-status').textContent = '⬤ Reconnexion...';
-};
+    updateBarChart(data.readings);
+
+    // Flash + notif sur nouvelle alerte
+    if (data.alerts && data.alerts.length > 0) {
+      const a = data.alerts[0];
+      document.body.style.boxShadow = `inset 0 0 0 3px ${a.level==='CRITICAL'?'#e74c3c':'#f39c12'}`;
+      setTimeout(() => document.body.style.boxShadow='', 1200);
+      sendNotification(`Alerte ${a.level} — ${a.sensor}`, a.reason || '', a.level);
+      _lastAlertTs = new Date(a.created_at); updateTimerDisplay();
+      addAlertRow(a);
+    }
+
+    document.getElementById('live-status').style.color = 'var(--success)';
+  };
+}
+connectSSE();
 
 function addAlertRow(a) {
   const tbody = document.getElementById('alerts-tbody');
@@ -433,14 +491,14 @@ function addAlertRow(a) {
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td style="text-align:center;"><a href="/alerts/${a.id}">${a.id}</a></td>
-    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><b>${a.sensor}</b></td>
+    <td><b>${a.sensor}</b></td>
     <td style="white-space:nowrap;">${a.value} ${a.unit}</td>
     <td><span class="badge badge-${a.level.toLowerCase()}">${a.level}</span></td>
-    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.method}</td>
     <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.reason}">${a.reason}</td>
     <td style="white-space:nowrap;font-size:.78rem;color:var(--muted);">${a.created_at.slice(0,19).replace('T',' ')}</td>
-    <td style="white-space:nowrap;text-align:center;"><button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button></td>
-  `;
+    <td style="white-space:nowrap;text-align:center;">
+      <button class="btn btn-sm btn-success" onclick="resolveAlert(${a.id},this)">Résoudre</button>
+    </td>`;
   tbody.prepend(tr);
 }
 </script>
