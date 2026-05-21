@@ -139,6 +139,7 @@ class AlertService:
         date_to: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
+        exclude_outliers: bool = False,
     ) -> list[SensorLog]:
         """Retourne l'historique des lectures capteurs."""
         q = self.db.query(SensorLog)
@@ -148,6 +149,8 @@ class AlertService:
             q = q.filter(SensorLog.created_at >= date_from)
         if date_to:
             q = q.filter(SensorLog.created_at <= date_to)
+        if exclude_outliers:
+            q = q.filter(SensorLog.level == "NORMAL")
         return q.order_by(desc(SensorLog.created_at)).offset(offset).limit(limit).all()
 
     def count_logs(
@@ -155,6 +158,7 @@ class AlertService:
         sensor: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        exclude_outliers: bool = False,
     ) -> int:
         q = self.db.query(SensorLog)
         if sensor:
@@ -163,6 +167,8 @@ class AlertService:
             q = q.filter(SensorLog.created_at >= date_from)
         if date_to:
             q = q.filter(SensorLog.created_at <= date_to)
+        if exclude_outliers:
+            q = q.filter(SensorLog.level == "NORMAL")
         return q.count()
 
     def get_stats(self) -> dict:

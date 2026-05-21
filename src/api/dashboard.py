@@ -150,6 +150,35 @@ def logs_page(
     })
 
 
+@dashboard_router.get("/logs/compare", response_class=HTMLResponse)
+def logs_compare_page(request: Request, db: Session = Depends(get_db)):
+    """Page de comparaison données complètes vs nettoyées."""
+    svc     = AlertService(db)
+    sensors = ["temperature", "turbidity", "ph"]
+
+    stats = []
+    for s in sensors:
+        total    = svc.count_logs(sensor=s, exclude_outliers=False)
+        clean    = svc.count_logs(sensor=s, exclude_outliers=True)
+        aberrant = total - clean
+        pct      = round(aberrant / total * 100, 1) if total else 0
+        stats.append({"sensor": s, "total": total, "clean": clean,
+                      "aberrant": aberrant, "pct": pct})
+
+    total_all    = sum(s["total"]    for s in stats)
+    clean_all    = sum(s["clean"]    for s in stats)
+    aberrant_all = sum(s["aberrant"] for s in stats)
+    pct_all      = round(aberrant_all / total_all * 100, 1) if total_all else 0
+
+    return templates.TemplateResponse(request, "logs_compare.html", {
+        "stats":        stats,
+        "total_all":    total_all,
+        "clean_all":    clean_all,
+        "aberrant_all": aberrant_all,
+        "pct_all":      pct_all,
+    })
+
+
 @dashboard_router.get("/report", response_class=HTMLResponse)
 def report_page(
     request: Request,
@@ -299,12 +328,15 @@ def presentation_page(request: Request, db: Session = Depends(get_db)):
     stats  = svc.get_stats()
     open_c = svc.get_open_count()
     health = svc.get_sensor_health()
-    mttr   = svc.get_mttr()
+    mttr_d = svc.get_mttr()
+    # Moyenne MTTR en minutes (mttr_d est un dict {sensor: secondes})
+    mttr_vals = [v for v in (mttr_d or {}).values() if v]
+    mttr_avg  = round(sum(mttr_vals) / len(mttr_vals) / 60, 1) if mttr_vals else None
     recent = svc.get_all(resolved=False, limit=6)
     return templates.TemplateResponse(request, "presentation.html", {
         "stats":  stats,
         "open":   open_c,
         "health": health,
-        "mttr":   mttr,
+        "mttr":   mttr_avg,
         "recent": [a.to_dict() for a in recent],
     })

@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}IoT Alert System{% endblock %} — INNOV/CCNB</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/static/app.css">
   {% block head %}{% endblock %}
   <link rel="manifest" href="/static/manifest.json">
@@ -38,7 +41,8 @@
     <div class="nav-section">Navigation</div>
     <a href="/"            class="nav-item {% if active=='dashboard'   %}active{% endif %}">📊 Dashboard</a>
     <a href="/alerts"      class="nav-item {% if active=='alerts'      %}active{% endif %}">🔔 Alertes</a>
-    <a href="/logs"        class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
+    <a href="/logs"         class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
+    <a href="/logs/compare" class="nav-item {% if active=='compare'     %}active{% endif %}" style="font-size:.82rem;padding-left:1.8rem;">↳ Comparer</a>
     <a href="/report"      class="nav-item {% if active=='report'      %}active{% endif %}">📄 Rapport</a>
     <a href="/params"      class="nav-item {% if active=='params'      %}active{% endif %}">⚙️ Paramètres</a>
     <a href="/config"      class="nav-item {% if active=='config'      %}active{% endif %}" style="font-size:.82rem;padding-left:1.8rem;">↳ Seuils</a>
@@ -65,14 +69,11 @@
     <!-- Footer sidebar -->
     <div class="sidebar-footer">
       <button class="dark-toggle" id="dark-toggle-btn" onclick="toggleDark()">🌙 Mode sombre</button>
-      <div style="position:relative;display:flex;gap:.3rem;">
-        <button class="notif-btn" id="notif-btn" onclick="requestNotifications()" style="flex:1;">🔔 Notifications</button>
-        <button class="notif-btn" onclick="toggleNotifHistory()" title="Historique notifications"
-          style="padding:.5rem .6rem;flex-shrink:0;position:relative;">
-          📋
-          <span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#e74c3c;color:#fff;border-radius:50%;width:16px;height:16px;font-size:.65rem;align-items:center;justify-content:center;font-weight:700;"></span>
-        </button>
-      </div>
+      <button class="notif-btn" id="notif-btn" onclick="requestNotifications()" style="width:100%;">🔔 Notifications</button>
+      <button class="notif-btn" onclick="toggleNotifHistory()" style="width:100%;margin-top:.3rem;position:relative;">
+        📋 Historique notifications
+        <span id="notif-badge" style="display:none;position:absolute;top:4px;right:8px;background:#e74c3c;color:#fff;border-radius:50%;min-width:16px;height:16px;padding:0 3px;font-size:.65rem;align-items:center;justify-content:center;font-weight:700;"></span>
+      </button>
       <a href="/profile" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">👤 Mon profil</a>
       <a href="/logout" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">🔓 Déconnexion</a>
     </div>

@@ -403,22 +403,262 @@ def get_audit(
     return {"logs": [l.to_dict() for l in logs], "total": total}
 
 
+@logs_router.post("/compare-two")
+async def compare_two_files(file1: UploadFile, file2: UploadFile):
+    """Compare deux fichiers CSV/Excel exportés et retourne leurs statistiques côte à côte."""
+    import csv as _csv, io as _io
+
+    async def parse_file(f: UploadFile) -> tuple[list[dict], str]:
+        fname   = f.filename or ""
+        content = await f.read()
+        if fname.endswith(".pdf"):
+            raise HTTPException(400, f"'{fname}' : PDF non supporté. Utilisez CSV ou Excel.")
+        rows = []
+        if fname.endswith(".xlsx"):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+                ws = wb.active
+                headers = [str(c.value).strip() if c.value else "" for c in ws[1]]
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    rows.append(dict(zip(headers, row)))
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(400, f"'{fname}' : Excel invalide — {e}")
+        else:
+            try:
+                text  = content.decode("utf-8", errors="replace")
+                lines = [l for l in text.splitlines() if not l.startswith("#")]
+                rows  = list(_csv.DictReader(lines))
+            except Exception as e:
+                raise HTTPException(400, f"'{fname}' : CSV invalide — {e}")
+        return rows, fname
+
+    def compute_stats(rows: list[dict]) -> dict:
+        sensors: dict[str, dict] = {}
+        skipped = 0
+        for row in rows:
+            sensor = str(row.get("sensor") or row.get("Capteur") or "").strip()
+            level  = str(row.get("level")  or row.get("Niveau")  or "NORMAL").strip().upper()
+            if not sensor:
+                skipped += 1
+                continue
+            if sensor not in sensors:
+                sensors[sensor] = {"total": 0, "clean": 0, "aberrant": 0}
+            sensors[sensor]["total"] += 1
+            if level == "NORMAL":
+                sensors[sensor]["clean"] += 1
+            else:
+                sensors[sensor]["aberrant"] += 1
+        stats = []
+        for s, d in sorted(sensors.items()):
+            pct = round(d["aberrant"] / d["total"] * 100, 1) if d["total"] else 0
+            stats.append({"sensor": s, "total": d["total"], "clean": d["clean"],
+                          "aberrant": d["aberrant"], "pct": pct})
+        total_all    = sum(s["total"]    for s in stats)
+        clean_all    = sum(s["clean"]    for s in stats)
+        aberrant_all = sum(s["aberrant"] for s in stats)
+        pct_all      = round(aberrant_all / total_all * 100, 1) if total_all else 0
+        return {"stats": stats, "total_all": total_all, "clean_all": clean_all,
+                "aberrant_all": aberrant_all, "pct_all": pct_all, "skipped": skipped}
+
+    rows1, fname1 = await parse_file(file1)
+    rows2, fname2 = await parse_file(file2)
+
+    if not rows1: raise HTTPException(400, f"'{fname1}' est vide.")
+    if not rows2: raise HTTPException(400, f"'{fname2}' est vide.")
+
+    s1 = compute_stats(rows1)
+    s2 = compute_stats(rows2)
+
+    # Différences ligne à ligne par capteur
+    all_sensors = sorted(set(
+        [s["sensor"] for s in s1["stats"]] + [s["sensor"] for s in s2["stats"]]
+    ))
+    def find(stats_list, sensor):
+        return next((s for s in stats_list if s["sensor"] == sensor),
+                    {"total": 0, "clean": 0, "aberrant": 0, "pct": 0})
+
+    diff = []
+    for sensor in all_sensors:
+        a = find(s1["stats"], sensor)
+        b = find(s2["stats"], sensor)
+        diff.append({
+            "sensor":        sensor,
+            "delta_total":   b["total"]    - a["total"],
+            "delta_clean":   b["clean"]    - a["clean"],
+            "delta_aberrant":b["aberrant"] - a["aberrant"],
+            "delta_pct":     round(b["pct"] - a["pct"], 1),
+        })
+
+    return {
+        "file1": {"filename": fname1, **s1},
+        "file2": {"filename": fname2, **s2},
+        "diff":  diff,
+        "delta_total":    s2["total_all"]    - s1["total_all"],
+        "delta_clean":    s2["clean_all"]    - s1["clean_all"],
+        "delta_aberrant": s2["aberrant_all"] - s1["aberrant_all"],
+        "delta_pct":      round(s2["pct_all"] - s1["pct_all"], 1),
+    }
+
+
+@logs_router.post("/compare-upload")
+async def compare_upload(file: UploadFile):
+    """
+    Analyse un fichier CSV ou Excel exporté depuis l'application
+    et retourne les statistiques de comparaison complet/nettoyé.
+    Colonnes attendues : sensor, value, unit, level, scenario, created_at
+    """
+    import csv as _csv, io as _io, json as _json
+
+    fname = file.filename or ""
+    content = await file.read()
+
+    if fname.endswith(".pdf"):
+        raise HTTPException(400, "Le format PDF ne peut pas être analysé comme données. Utilisez CSV ou Excel.")
+
+    rows = []
+    if fname.endswith(".xlsx"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+            ws = wb.active
+            headers = [str(c.value).strip() if c.value else "" for c in ws[1]]
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                rows.append(dict(zip(headers, row)))
+        except Exception as e:
+            raise HTTPException(400, f"Fichier Excel invalide : {e}")
+
+    elif fname.endswith(".json"):
+        try:
+            rows = _json.loads(content.decode("utf-8", errors="replace"))
+            if not isinstance(rows, list):
+                raise HTTPException(400, "JSON invalide : tableau attendu")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Fichier JSON invalide : {e}")
+
+    else:
+        # CSV — ignorer les lignes commentaires (#)
+        try:
+            text  = content.decode("utf-8", errors="replace")
+            lines = [l for l in text.splitlines() if not l.startswith("#")]
+            rows  = list(_csv.DictReader(lines))
+        except Exception as e:
+            raise HTTPException(400, f"Fichier CSV invalide : {e}")
+
+    if not rows:
+        raise HTTPException(400, "Le fichier est vide ou illisible.")
+
+    # Calcul des stats par capteur
+    sensors: dict[str, dict] = {}
+    skipped = 0
+    for row in rows:
+        sensor = str(row.get("sensor") or row.get("Capteur") or "").strip()
+        level  = str(row.get("level")  or row.get("Niveau")  or "NORMAL").strip().upper()
+        if not sensor:
+            skipped += 1
+            continue
+        if sensor not in sensors:
+            sensors[sensor] = {"total": 0, "clean": 0, "aberrant": 0}
+        sensors[sensor]["total"] += 1
+        if level == "NORMAL":
+            sensors[sensor]["clean"] += 1
+        else:
+            sensors[sensor]["aberrant"] += 1
+
+    stats = []
+    for s, d in sorted(sensors.items()):
+        pct = round(d["aberrant"] / d["total"] * 100, 1) if d["total"] else 0
+        stats.append({"sensor": s, "total": d["total"], "clean": d["clean"],
+                      "aberrant": d["aberrant"], "pct": pct})
+
+    total_all    = sum(s["total"]    for s in stats)
+    clean_all    = sum(s["clean"]    for s in stats)
+    aberrant_all = sum(s["aberrant"] for s in stats)
+    pct_all      = round(aberrant_all / total_all * 100, 1) if total_all else 0
+
+    return {
+        "filename":     fname,
+        "stats":        stats,
+        "total_all":    total_all,
+        "clean_all":    clean_all,
+        "aberrant_all": aberrant_all,
+        "pct_all":      pct_all,
+        "skipped":      skipped,
+    }
+
+
+@logs_router.get("/export")
+def export_logs_csv(
+    sensor:           str | None = Query(None),
+    date_from:        str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to:          str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    include_outliers: bool       = Query(True,  description="False = exclure WARNING/CRITICAL"),
+    db: Session = Depends(get_db),
+):
+    """Exporte les lectures capteurs en CSV (avec ou sans valeurs aberrantes)."""
+    from datetime import datetime, timezone, timedelta
+    df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
+    dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
+    svc = AlertService(db)
+
+    total_count    = svc.count_logs(sensor=sensor, date_from=df, date_to=dt, exclude_outliers=False)
+    clean_count    = svc.count_logs(sensor=sensor, date_from=df, date_to=dt, exclude_outliers=True)
+    aberrant_count = total_count - clean_count
+
+    logs = svc.get_logs(
+        sensor=sensor, date_from=df, date_to=dt,
+        limit=10000, offset=0,
+        exclude_outliers=not include_outliers,
+    )
+
+    output = io.StringIO()
+    # -- Bloc de description --
+    if include_outliers:
+        output.write(f"# Export : Données complètes (valeurs aberrantes INCLUSES)\n")
+        output.write(f"# Valeurs aberrantes présentes : {aberrant_count} lecture(s) sur {total_count}\n")
+    else:
+        output.write(f"# Export : Données nettoyées (valeurs aberrantes SUPPRIMÉES)\n")
+        output.write(f"# Lignes retirées : {aberrant_count} lecture(s) | Conservées : {clean_count} sur {total_count}\n")
+    output.write(f"# Généré le : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    if sensor:
+        output.write(f"# Capteur filtré : {sensor}\n")
+    output.write("#\n")
+
+    fieldnames = ["id", "sensor", "value", "unit", "level", "scenario", "created_at"]
+    writer     = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for l in logs:
+        writer.writerow(l.to_dict())
+    output.seek(0)
+    suffix = "brut" if include_outliers else "nettoye"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=lectures_{suffix}.csv"},
+    )
+
+
 @logs_router.get("")
 def list_logs(
-    sensor:    str | None = Query(None),
-    date_from: str | None = Query(None, description="ISO date YYYY-MM-DD"),
-    date_to:   str | None = Query(None, description="ISO date YYYY-MM-DD"),
-    limit:  int = Query(100, ge=1, le=500),
-    offset: int = Query(0,   ge=0),
+    sensor:           str | None = Query(None),
+    date_from:        str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    date_to:          str | None = Query(None, description="ISO date YYYY-MM-DD"),
+    limit:            int        = Query(100, ge=1, le=10000),
+    offset:           int        = Query(0,   ge=0),
+    exclude_outliers: bool       = Query(False, description="True = exclure WARNING/CRITICAL"),
     db: Session = Depends(get_db),
 ):
     """Historique des lectures capteurs."""
     from datetime import datetime, timezone, timedelta
     df = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else None
     dt = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc) if date_to else None
-    svc  = AlertService(db)
-    logs = svc.get_logs(sensor=sensor, date_from=df, date_to=dt, limit=limit, offset=offset)
-    total = svc.count_logs(sensor=sensor, date_from=df, date_to=dt)
+    svc   = AlertService(db)
+    logs  = svc.get_logs(sensor=sensor, date_from=df, date_to=dt, limit=limit, offset=offset, exclude_outliers=exclude_outliers)
+    total = svc.count_logs(sensor=sensor, date_from=df, date_to=dt, exclude_outliers=exclude_outliers)
     return {"logs": [l.to_dict() for l in logs], "count": len(logs), "total": total}
 
 

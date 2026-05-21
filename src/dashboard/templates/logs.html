@@ -30,6 +30,26 @@
   </form>
 </div>
 
+<!-- Barre d'export -->
+<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.2rem;align-items:center;">
+  <span style="font-size:.83rem;color:var(--muted);margin-right:.2rem;">Export :</span>
+
+  <a href="/api/logs/export?include_outliers=true{% if sensor %}&sensor={{ sensor }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}"
+     class="btn btn-outline btn-sm" download title="Toutes les lectures (NORMAL + WARNING + CRITICAL)">
+    ⬇ CSV complet
+  </a>
+  <a href="/api/logs/export?include_outliers=false{% if sensor %}&sensor={{ sensor }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}"
+     class="btn btn-outline btn-sm" download title="Lectures NORMAL uniquement (valeurs aberrantes supprimées)">
+    ⬇ CSV nettoyé
+  </a>
+
+  <button class="btn btn-outline btn-sm" onclick="exportExcelLogs(true)"  title="Toutes les lectures">⬇ Excel complet</button>
+  <button class="btn btn-outline btn-sm" onclick="exportExcelLogs(false)" title="Sans WARNING/CRITICAL">⬇ Excel nettoyé</button>
+
+  <button class="btn btn-outline btn-sm" onclick="exportPdfLogs(true)"   title="Toutes les lectures">⬇ PDF complet</button>
+  <button class="btn btn-outline btn-sm" onclick="exportPdfLogs(false)"  title="Sans WARNING/CRITICAL">⬇ PDF nettoyé</button>
+</div>
+
 <!-- Graphique horodatages réels -->
 <div class="chart-card" style="margin-bottom:1.5rem;">
   <div class="chart-title">Évolution des valeurs — 60 dernières lectures</div>
@@ -87,6 +107,9 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 // Utilise chart_logs (60 dernières) pour le graphique, indépendant de la pagination
 const chartData = {{ chart_logs | tojson }};
@@ -126,5 +149,157 @@ new Chart(document.getElementById('chartLine'), {
     }
   }
 });
+
+// ── Helpers export logs ────────────────────────────────────────────────────
+
+const EXPORT_SENSOR   = "{{ sensor or '' }}";
+const EXPORT_DATE_FROM = "{{ date_from or '' }}";
+const EXPORT_DATE_TO   = "{{ date_to or '' }}";
+
+async function fetchLogsForExport(includeOutliers) {
+  const base = new URLSearchParams();
+  if (EXPORT_SENSOR)    base.set('sensor',    EXPORT_SENSOR);
+  if (EXPORT_DATE_FROM) base.set('date_from', EXPORT_DATE_FROM);
+  if (EXPORT_DATE_TO)   base.set('date_to',   EXPORT_DATE_TO);
+
+  // Comptages pour construire le message
+  const pTotal = new URLSearchParams(base); pTotal.set('limit','1'); pTotal.set('exclude_outliers','false');
+  const pClean = new URLSearchParams(base); pClean.set('limit','1'); pClean.set('exclude_outliers','true');
+  const [rTotal, rClean] = await Promise.all([
+    fetch(`/api/logs?${pTotal}`).then(r => r.json()),
+    fetch(`/api/logs?${pClean}`).then(r => r.json()),
+  ]);
+  const totalCount    = rTotal.total  ?? 0;
+  const cleanCount    = rClean.total  ?? 0;
+  const aberrantCount = totalCount - cleanCount;
+
+  // Données réelles à exporter
+  const pData = new URLSearchParams(base);
+  pData.set('limit', '10000');
+  pData.set('exclude_outliers', includeOutliers ? 'false' : 'true');
+  const data = await fetch(`/api/logs?${pData}`).then(r => r.json());
+
+  return { rows: data.logs || [], totalCount, cleanCount, aberrantCount };
+}
+
+// ── Export Excel ───────────────────────────────────────────────────────────
+async function exportExcelLogs(includeOutliers) {
+  const { rows, totalCount, cleanCount, aberrantCount } = await fetchLogsForExport(includeOutliers);
+  if (!rows.length) { alert('Aucune donnée à exporter.'); return; }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'INNOV IoT Alert System';
+  const ws = wb.addWorksheet(includeOutliers ? 'Lectures complètes' : 'Lectures nettoyées');
+
+  ws.columns = [
+    { header: '#ID',       key: 'id',         width: 8  },
+    { header: 'Capteur',   key: 'sensor',      width: 16 },
+    { header: 'Valeur',    key: 'value',       width: 12 },
+    { header: 'Unité',     key: 'unit',        width: 8  },
+    { header: 'Niveau',    key: 'level',       width: 12 },
+    { header: 'Scénario',  key: 'scenario',    width: 14 },
+    { header: 'Horodatage',key: 'created_at',  width: 22 },
+  ];
+
+  // En-tête couleur
+  ws.getRow(1).eachCell(cell => {
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF1A5C9C' } };
+    cell.font = { bold:true, color:{ argb:'FFFFFFFF' } };
+    cell.alignment = { horizontal:'center' };
+  });
+
+  const levelColors = { NORMAL:'FFC8E6C9', WARNING:'FFFFF9C4', CRITICAL:'FFFFCDD2' };
+
+  rows.forEach(l => {
+    const row = ws.addRow({
+      id:         l.id,
+      sensor:     l.sensor,
+      value:      l.value,
+      unit:       l.unit,
+      level:      l.level,
+      scenario:   l.scenario || '—',
+      created_at: (l.created_at || '').replace('T',' ').slice(0,19),
+    });
+    const color = levelColors[l.level] || 'FFFFFFFF';
+    row.eachCell(cell => {
+      cell.fill = { type:'pattern', pattern:'solid', fgColor:{ argb: color } };
+    });
+  });
+
+  ws.addRow([]);
+  const msg = includeOutliers
+    ? `Export complet — ${totalCount} lecture(s) dont ${aberrantCount} valeur(s) aberrante(s) (WARNING/CRITICAL incluses)`
+    : `Export nettoyé — ${cleanCount} lecture(s) conservée(s) | ${aberrantCount} ligne(s) retirée(s) sur ${totalCount} (valeurs aberrantes supprimées)`;
+  const infoRow = ws.addRow([msg]);
+  infoRow.getCell(1).font = { italic:true, color:{ argb:'FF888888' } };
+
+  const buf    = await wb.xlsx.writeBuffer();
+  const blob   = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a      = document.createElement('a');
+  a.href       = URL.createObjectURL(blob);
+  a.download   = `lectures_${includeOutliers ? 'brut' : 'nettoye'}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  a.click();
+}
+
+// ── Export PDF ─────────────────────────────────────────────────────────────
+async function exportPdfLogs(includeOutliers) {
+  const { rows, totalCount, cleanCount, aberrantCount } = await fetchLogsForExport(includeOutliers);
+  if (!rows.length) { alert('Aucune donnée à exporter.'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc   = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const titre = includeOutliers
+    ? 'Historique des lectures IoT — Données complètes'
+    : 'Historique des lectures IoT — Données nettoyées';
+
+  const statMsg = includeOutliers
+    ? `${totalCount} lecture(s) au total · dont ${aberrantCount} valeur(s) aberrante(s) incluse(s) (WARNING/CRITICAL)`
+    : `${cleanCount} lecture(s) conservée(s) · ${aberrantCount} ligne(s) retirée(s) sur ${totalCount} (valeurs aberrantes supprimées)`;
+
+  doc.setFontSize(14);
+  doc.setTextColor(26, 92, 156);
+  doc.text('INNOV / CCNB', 14, 14);
+  doc.setFontSize(11);
+  doc.setTextColor(40, 40, 40);
+  doc.text(titre, 14, 22);
+  doc.setFontSize(8);
+  doc.setTextColor(130, 130, 130);
+  doc.text(`Généré le ${new Date().toLocaleString('fr-CA')}`, 14, 28);
+  doc.text(statMsg, 14, 33);
+
+  const levelColor = l => {
+    if (l === 'CRITICAL') return [255, 205, 210];
+    if (l === 'WARNING')  return [255, 249, 196];
+    return [200, 230, 201];
+  };
+
+  doc.autoTable({
+    startY: 39,
+    head: [['#ID', 'Capteur', 'Valeur', 'Unité', 'Niveau', 'Scénario', 'Horodatage']],
+    body: rows.map(l => [
+      l.id,
+      l.sensor,
+      l.value,
+      l.unit,
+      l.level,
+      l.scenario || '—',
+      (l.created_at || '').replace('T', ' ').slice(0, 19),
+    ]),
+    headStyles: { fillColor:[26,92,156], textColor:255, fontSize:8, fontStyle:'bold' },
+    bodyStyles: { fontSize:7.5 },
+    alternateRowStyles: { fillColor:[245,248,255] },
+    didParseCell(data) {
+      if (data.section === 'body' && data.column.index === 4) {
+        const lvl = data.cell.raw;
+        data.cell.styles.fillColor = levelColor(lvl);
+        data.cell.styles.fontStyle = lvl === 'CRITICAL' ? 'bold' : 'normal';
+      }
+    },
+    margin: { left:14, right:14 },
+  });
+
+  const fname = `lectures_${includeOutliers ? 'brut' : 'nettoye'}_${new Date().toISOString().slice(0,10)}.pdf`;
+  doc.save(fname);
+}
 </script>
 {% endblock %}
