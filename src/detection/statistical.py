@@ -2,8 +2,9 @@
 statistical.py
 --------------
 Détection d'anomalies par méthodes statistiques :
-  - Z-score  : détecte les valeurs qui s'éloignent de la moyenne (en nb d'écarts-types)
-  - IQR      : détecte les valeurs hors de l'intervalle interquartile
+  - Z-score          : détecte les valeurs qui s'éloignent de la moyenne (en nb d'écarts-types)
+  - IQR              : détecte les valeurs hors de l'intervalle interquartile
+  - Isolation Forest : détection non-supervisée par arbres d'isolation (scikit-learn)
 
 Ces méthodes s'adaptent aux données observées — elles détectent
 les dérives progressives que les seuils fixes peuvent rater.
@@ -11,6 +12,7 @@ les dérives progressives que les seuils fixes peuvent rater.
 
 from collections import deque
 import numpy as np
+from sklearn.ensemble import IsolationForest
 
 from ..simulator.config import SENSOR_CONFIG
 from ..simulator.generator import SensorReading
@@ -172,3 +174,115 @@ class IQRDetector:
             expected_min = round(lower_warn, 3),
             expected_max = round(upper_warn, 3),
         )
+
+
+class IsolationForestDetector:
+    """
+    Détecteur basé sur Isolation Forest (scikit-learn).
+
+    L'algorithme construit 100 arbres de décision aléatoires et mesure
+    la longueur du chemin pour isoler chaque valeur. Les anomalies
+    sont isolées plus rapidement (chemin plus court = score négatif).
+
+    Paramètres :
+        window_size   : taille de la fenêtre d'entraînement (défaut 100)
+        min_samples   : nb de lectures avant d'activer le modèle (défaut 20)
+        contamination : proportion d'anomalies attendue (défaut 0.05 = 5 %)
+        retrain_every : réentraîne le modèle tous les N points (défaut 20)
+    """
+
+    def __init__(
+        self,
+        window_size:   int   = 100,
+        min_samples:   int   = 20,
+        contamination: float = 0.05,
+        retrain_every: int   = 20,
+    ):
+        self.window_size   = window_size
+        self.min_samples   = min_samples
+        self.contamination = contamination
+        self.retrain_every = retrain_every
+        self._windows: dict[str, deque]          = {s: deque(maxlen=window_size) for s in SENSOR_CONFIG}
+        self._models:  dict[str, IsolationForest] = {}
+        self._counts:  dict[str, int]            = {s: 0 for s in SENSOR_CONFIG}
+
+    def _train(self, sensor: str) -> None:
+        """Entraîne (ou réentraîne) le modèle Isolation Forest sur la fenêtre courante."""
+        arr = np.array(self._windows[sensor]).reshape(-1, 1)
+        model = IsolationForest(
+            n_estimators  = 100,
+            contamination = self.contamination,
+            random_state  = 42,
+            n_jobs        = 1,
+        )
+        model.fit(arr)
+        self._models[sensor] = model
+
+    def analyze(self, reading: SensorReading) -> DetectionResult:
+        cfg    = SENSOR_CONFIG[reading.sensor]
+        window = self._windows[reading.sensor]
+        value  = reading.value
+        sensor = reading.sensor
+
+        window.append(value)
+        self._counts[sensor] = self._counts.get(sensor, 0) + 1
+
+        # Pas assez de données
+        if len(window) < self.min_samples:
+            return DetectionResult(
+                sensor    = sensor,
+                value     = value,
+                unit      = cfg["unit"],
+                level     = AlertLevel.NORMAL,
+                method    = "isolation_forest",
+                reason    = f"Initialisation ({len(window)}/{self.min_samples} points)",
+                timestamp = reading.timestamp,
+            )
+
+        # Entraîner / réentraîner périodiquement
+        if sensor not in self._models or self._counts[sensor] % self.retrain_every == 0:
+            self._train(sensor)
+
+        model = self._models[sensor]
+        x     = np.array([[value]])
+        score = float(model.decision_function(x)[0])  # > 0 = normal, < 0 = anomalie
+        pred  = int(model.predict(x)[0])               # 1 = normal, -1 = anomalie
+
+        if pred == -1:
+            # Distinguer WARNING vs CRITICAL selon l'amplitude du score négatif
+            if score < -0.1:
+                level  = AlertLevel.CRITICAL
+                reason = (
+                    f"Isolation Forest : anomalie critique (score={score:.3f}) "
+                    f"— valeur : {value} {cfg['unit']}"
+                )
+            else:
+                level  = AlertLevel.WARNING
+                reason = (
+                    f"Isolation Forest : anomalie detectee (score={score:.3f}) "
+                    f"— valeur : {value} {cfg['unit']}"
+                )
+        else:
+            level  = AlertLevel.NORMAL
+            reason = (
+                f"Isolation Forest : normal (score={score:.3f}) "
+                f"— valeur : {value} {cfg['unit']}"
+            )
+
+        return DetectionResult(
+            sensor    = sensor,
+            value     = value,
+            unit      = cfg["unit"],
+            level     = level,
+            method    = "isolation_forest",
+            reason    = reason,
+            timestamp = reading.timestamp,
+        )
+
+    def reset(self, sensor: str | None = None) -> None:
+        """Vide la fenêtre et le modèle d'un capteur (ou tous)."""
+        targets = [sensor] if sensor else list(SENSOR_CONFIG)
+        for s in targets:
+            self._windows[s].clear()
+            self._models.pop(s, None)
+            self._counts[s] = 0
