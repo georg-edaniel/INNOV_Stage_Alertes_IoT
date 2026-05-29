@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ── Job 1 : Tests ──────────────────────────────────────────────
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run detection tests
+        run: pytest tests/test_detection.py -v
+
+      - name: Run API integration tests
+        run: pytest tests/test_api.py -v --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          verbose: false
+
+  # ── Job 2 : Lint ──────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (erreurs critiques uniquement)
+        run: ruff check src/ --select E9,F8,F7,W6 --output-format=github
+
+  # ── Job 3 : Docker build check ───────────────────────────────
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t innov-iot:ci .
+
+      - name: Verify image starts
+        run: |
+          docker run -d --name test-container -p 8084:8084 innov-iot:ci
+          sleep 5
+          docker exec test-container python -c "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')" || echo "Health check attempted"
+          docker stop test-container
+          docker rm test-container

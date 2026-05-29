@@ -3,10 +3,10 @@
 {% block title %}Alertes archivées{% endblock %}
 
 {% block content %}
-<h1 class="page-title">
-  📦 Alertes archivées
-  <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} archivée(s)</span>
-</h1>
+<div class="page-header">
+  <h1 class="page-title">📦 Alertes archivées</h1>
+  <p class="page-subtitle">{{ total }} alerte(s) archivée(s) — alertes résolues de plus de 30 jours</p>
+</div>
 
 <!-- Filtres -->
 <form method="get" action="/archived">

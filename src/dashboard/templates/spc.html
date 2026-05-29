@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% set active = "spc" %}
+{% block title %}SPC — Graphiques de Contrôle{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">📉 Graphiques de Contrôle Shewhart (SPC)</h1>
+  <p class="page-subtitle">Limites UCL/LCL (±3σ) et zone d'avertissement (±2σ) par capteur</p>
+</div>
+
+<div style="display:grid;gap:1.5rem;">
+
+{% set sensor_labels = {"temperature": "🌡 Température", "turbidity": "💧 Turbidité", "ph": "⚗ pH"} %}
+
+{% for sensor, chart in charts.items() %}
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <h3 style="margin:0;">{{ sensor_labels[sensor] }}</h3>
+    {% if chart.status == "ok" %}
+    <div style="display:flex;gap:1.5rem;font-size:.85rem;">
+      <span>UCL <b style="color:#e74c3c;">{{ chart.ucl }}</b> {{ chart.unit }}</span>
+      <span>μ <b>{{ chart.mean }}</b> {{ chart.unit }}</span>
+      <span>LCL <b style="color:#e74c3c;">{{ chart.lcl }}</b> {{ chart.unit }}</span>
+      <span>σ = <b>{{ chart.sigma }}</b></span>
+      {% if chart.violations %}
+      <span style="background:#e74c3c;color:#fff;padding:.15rem .5rem;border-radius:4px;">
+        ⚠ {{ chart.violations|length }} violation(s)
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if chart.status == "no_data" %}
+  <div style="text-align:center;padding:2rem;color:#999;">Aucune donnée disponible</div>
+  {% elif chart.status == "ok" %}
+  <div style="position:relative;height:280px;padding:.5rem 0;">
+    <canvas id="spc-{{ sensor }}"></canvas>
+  </div>
+
+  {% if chart.violations %}
+  <div style="margin-top:.5rem;padding:.75rem 1rem;background:#fff5f5;border-radius:6px;border-left:3px solid #e74c3c;">
+    <b style="color:#e74c3c;">Violations détectées :</b>
+    {% for v in chart.violations %}
+    <span style="display:inline-block;margin:.2rem .3rem;padding:.15rem .5rem;border-radius:3px;font-size:.8rem;
+      background:{% if v.level=='CRITICAL' %}#e74c3c{% else %}#f39c12{% endif %};color:#fff;">
+      #{{ v.index }} : {{ v.value }} {{ chart.unit }}
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+
+</div>
+
+<script>
+const chartsData = {{ charts | tojson }};
+
+const COLORS = {
+  temperature: '#e74c3c',
+  turbidity:   '#3498db',
+  ph:          '#2ecc71',
+};
+
+for (const [sensor, data] of Object.entries(chartsData)) {
+  if (data.status !== 'ok') continue;
+
+  const ctx = document.getElementById(`spc-${sensor}`);
+  if (!ctx) continue;
+
+  const n      = data.values.length;
+  const labels = data.values.map((_, i) => `t-${n - 1 - i}`).reverse().map((_, i) => `t${i}`);
+  const color  = COLORS[sensor] || '#1a5c9c';
+
+  // Marqueurs de violation
+  const pointColors = data.values.map((v, i) => {
+    const isViol = data.violations && data.violations.some(vv => vv.index === i);
+    if (isViol) {
+      const vl = data.violations.find(vv => vv.index === i);
+      return vl.level === 'CRITICAL' ? '#e74c3c' : '#f39c12';
+    }
+    return color;
+  });
+  const pointRadius = data.values.map((v, i) => {
+    return (data.violations && data.violations.some(vv => vv.index === i)) ? 7 : 3;
+  });
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: `${sensor} (${data.unit})`,
+          data: data.values,
+          borderColor: color,
+          backgroundColor: color + '22',
+          pointBackgroundColor: pointColors,
+          pointRadius,
+          tension: 0.2,
+          order: 1,
+        },
+        {
+          label: 'UCL (μ+3σ)',
+          data: Array(n).fill(data.ucl),
+          borderColor: '#e74c3c',
+          borderDash: [6, 3],
+          pointRadius: 0,
+          borderWidth: 1.5,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: 'UWL (μ+2σ)',
+          data: Array(n).fill(data.uwl),
+          borderColor: '#f39c12',
+          borderDash: [4, 4],
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: 'Moyenne',
+          data: Array(n).fill(data.mean),
+          borderColor: '#27ae60',
+          borderDash: [2, 2],
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: 'LWL (μ-2σ)',
+          data: Array(n).fill(data.lwl),
+          borderColor: '#f39c12',
+          borderDash: [4, 4],
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+          order: 2,
+        },
+        {
+          label: 'LCL (μ-3σ)',
+          data: Array(n).fill(data.lcl),
+          borderColor: '#e74c3c',
+          borderDash: [6, 3],
+          pointRadius: 0,
+          borderWidth: 1.5,
+          fill: false,
+          order: 2,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} ${data.unit}`,
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 15 } },
+        y: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

@@ -4,7 +4,7 @@ import pytest
 from src.simulator.generator import SensorReading
 from src.detection.levels import AlertLevel
 from src.detection.rules import RuleBasedDetector
-from src.detection.statistical import ZScoreDetector, IQRDetector
+from src.detection.statistical import ZScoreDetector, IQRDetector, IsolationForestDetector
 from src.detection.engine import AnomalyDetectionEngine
 
 
@@ -113,6 +113,49 @@ class TestIQRDetector:
         self._feed_normal("ph", 20, value=7.0)
         r = self.det.analyze(make_reading("ph", 50.0))
         assert r.level in (AlertLevel.WARNING, AlertLevel.CRITICAL)
+
+
+# ── IsolationForestDetector ────────────────────────────────────────────────
+
+class TestIsolationForestDetector:
+    def setup_method(self):
+        self.det = IsolationForestDetector(window_size=100, min_samples=20)
+
+    def _feed_normal(self, sensor: str, n: int = 25):
+        """Alimente le détecteur avec n valeurs normales distribuées (μ=20, σ=1)."""
+        import numpy as np
+        rng = np.random.default_rng(42)
+        for v in rng.normal(20.0, 1.0, n):
+            self.det.analyze(make_reading(sensor, float(v)))
+
+    def test_initialisation_retourne_normal(self):
+        r = self.det.analyze(make_reading("temperature", 20.0))
+        assert r.level == AlertLevel.NORMAL
+        assert "Initialisation" in r.reason
+
+    def test_valeur_normale_apres_warmup(self):
+        self._feed_normal("temperature", 25)
+        r = self.det.analyze(make_reading("temperature", 20.5))
+        assert r.level == AlertLevel.NORMAL
+
+    def test_spike_detecte_apres_warmup(self):
+        """IF détecte une anomalie modérée après calibration sur les données."""
+        import numpy as np
+        rng = np.random.default_rng(42)
+        # 19 valeurs normales serrées (σ=0.5) — distribution très concentrée
+        for v in rng.normal(20.0, 0.5, 19):
+            self.det.analyze(make_reading("temperature", float(v)))
+        # 20e point = anomalie modérée → déclenche le 1er entraînement (count==min_samples)
+        self.det.analyze(make_reading("temperature", 30.0))
+        # Retester la même anomalie — IF la reconnaît comme hors distribution
+        r = self.det.analyze(make_reading("temperature", 30.0))
+        assert r.level in (AlertLevel.WARNING, AlertLevel.CRITICAL)
+
+    def test_reset_vide_fenetre_et_modele(self):
+        self._feed_normal("temperature", 25)
+        self.det.reset("temperature")
+        r = self.det.analyze(make_reading("temperature", 20.0))
+        assert "Initialisation" in r.reason
 
 
 # ── AnomalyDetectionEngine ─────────────────────────────────────────────────

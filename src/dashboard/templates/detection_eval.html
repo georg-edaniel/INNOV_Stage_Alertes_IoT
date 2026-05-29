@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% set active = "detection_eval" %}
+{% block title %}Évaluation des détecteurs{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">🔬 Évaluation des détecteurs</h1>
+  <p class="page-subtitle">Métriques precision, recall, F1 par détecteur — bootstrap {{ n_bootstrap }} seeds</p>
+</div>
+
+<div class="info-box">
+  Évaluation rigoureuse sur <strong>{{ total_readings }} lectures test</strong> (seed=0–{{ n_bootstrap - 1 }}, reproductible) —
+  <strong>{{ warmup_readings }} lectures warmup</strong> (calibration seule, non évaluées) —
+  Vraies anomalies : <strong>{{ true_anomalies }}</strong> · Lectures normales : <strong>{{ true_normals }}</strong><br>
+  <span style="font-size:.82rem;opacity:.8;">Intervalles de confiance par <strong>bootstrap {{ n_bootstrap }} seeds</strong> : métriques affichées sous forme mean ± std</span>
+</div>
+
+<!-- KPIs synthèse -->
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1.5rem;">
+  {% for key, m in metrics.items() %}
+  <div class="kpi-card {% if m.f1_mean >= 0.7 %}success{% elif m.f1_mean >= 0.4 %}warning{% else %}critical{% endif %}">
+    <div class="kpi-label">{{ m.name }}</div>
+    <div class="kpi-value">{{ "%.0f"|format(m.f1_mean * 100) }}%</div>
+    <div class="kpi-sub">F1 moyen ± {{ "%.0f"|format(m.f1_std * 100) }}%</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Tableau comparatif avec CI -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 class="section-title">📊 Tableau comparatif (mean ± std, {{ n_bootstrap }} seeds)</h2>
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:.9rem;">
+      <thead>
+        <tr style="background:var(--bg-alt,#f5f7fa);text-align:left;">
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);">Détecteur</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">Précision</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">Rappel</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;font-weight:700;">F1</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">TP</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">FP</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">FN</th>
+          <th style="padding:.6rem .9rem;border-bottom:2px solid var(--border);text-align:center;">TN</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key, m in metrics.items() %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.55rem .9rem;font-weight:600;">{{ m.name }}</td>
+          <td style="padding:.55rem .9rem;text-align:center;">
+            <span style="color:{% if m.precision_mean >= 0.7 %}#27ae60{% elif m.precision_mean >= 0.4 %}#f39c12{% else %}#e74c3c{% endif %};">
+              {{ "%.1f"|format(m.precision_mean * 100) }}% <span style="font-size:.8em;opacity:.7;">± {{ "%.1f"|format(m.precision_std * 100) }}%</span>
+            </span>
+          </td>
+          <td style="padding:.55rem .9rem;text-align:center;">
+            <span style="color:{% if m.recall_mean >= 0.7 %}#27ae60{% elif m.recall_mean >= 0.4 %}#f39c12{% else %}#e74c3c{% endif %};">
+              {{ "%.1f"|format(m.recall_mean * 100) }}% <span style="font-size:.8em;opacity:.7;">± {{ "%.1f"|format(m.recall_std * 100) }}%</span>
+            </span>
+          </td>
+          <td style="padding:.55rem .9rem;text-align:center;font-weight:700;">
+            <span style="color:{% if m.f1_mean >= 0.7 %}#27ae60{% elif m.f1_mean >= 0.4 %}#f39c12{% else %}#e74c3c{% endif %};">
+              {{ "%.1f"|format(m.f1_mean * 100) }}% <span style="font-size:.8em;opacity:.7;">± {{ "%.1f"|format(m.f1_std * 100) }}%</span>
+            </span>
+          </td>
+          <td style="padding:.55rem .9rem;text-align:center;color:#27ae60;">{{ m.tp }}</td>
+          <td style="padding:.55rem .9rem;text-align:center;color:#e74c3c;">{{ m.fp }}</td>
+          <td style="padding:.55rem .9rem;text-align:center;color:#f39c12;">{{ m.fn }}</td>
+          <td style="padding:.55rem .9rem;text-align:center;color:#95a5a6;">{{ m.tn }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="font-size:.78rem;color:var(--muted,#888);margin-top:.7rem;padding:.5rem .9rem;background:var(--bg-alt,#f5f7fa);border-radius:6px;">
+    <strong>Légende</strong> — TP : Vrai positif · FP : Faux positif · FN : Faux négatif · TN : Vrai négatif<br>
+    Précision = TP/(TP+FP) · Rappel = TP/(TP+FN) · F1 = 2·P·R/(P+R) · TP/FP/FN/TN issus du dernier seed
+  </div>
+</div>
+
+<!-- Graphiques Chart.js -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;margin-bottom:1.5rem;">
+
+  <!-- Barres : F1 / Précision / Rappel (moyennes) -->
+  <div class="card">
+    <h2 class="section-title">📈 Précision / Rappel / F1 (moyennes)</h2>
+    <canvas id="barChart" height="220"></canvas>
+  </div>
+
+  <!-- Radar -->
+  <div class="card">
+    <h2 class="section-title">🕸 Radar comparatif</h2>
+    <canvas id="radarChart" height="220"></canvas>
+  </div>
+
+</div>
+
+<!-- Analyse de sensibilité -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 class="section-title">🔎 Analyse de sensibilité — F1 selon la taille de fenêtre</h2>
+  <p style="font-size:.85rem;color:var(--muted,#888);margin-bottom:.8rem;">
+    F1-Score (seed=42) en fonction de <code>window_size</code> pour Z-Score et IQR.
+    Chaque point = 200 warmup + 400 test avec la taille de fenêtre donnée.
+  </p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:start;">
+    <canvas id="sensitivityChart" height="200"></canvas>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+        <thead>
+          <tr style="background:var(--bg-alt,#f5f7fa);">
+            <th style="padding:.5rem .8rem;border-bottom:2px solid var(--border);text-align:center;">Fenêtre</th>
+            <th style="padding:.5rem .8rem;border-bottom:2px solid var(--border);text-align:center;color:#1a5c9c;">Z-Score F1</th>
+            <th style="padding:.5rem .8rem;border-bottom:2px solid var(--border);text-align:center;color:#27ae60;">IQR F1</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i in range(window_sizes|length) %}
+          <tr style="border-bottom:1px solid var(--border);{% if window_sizes[i] == 30 %}background:rgba(26,92,156,.05);font-weight:600;{% endif %}">
+            <td style="padding:.4rem .8rem;text-align:center;">
+              {{ window_sizes[i] }}{% if window_sizes[i] == 30 %} ★{% endif %}
+            </td>
+            <td style="padding:.4rem .8rem;text-align:center;color:#1a5c9c;">
+              {{ "%.1f"|format(sensitivity.zscore[i] * 100) }}%
+            </td>
+            <td style="padding:.4rem .8rem;text-align:center;color:#27ae60;">
+              {{ "%.1f"|format(sensitivity.iqr[i] * 100) }}%
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div style="font-size:.75rem;color:var(--muted,#888);margin-top:.5rem;">★ = valeur utilisée en production</div>
+    </div>
+  </div>
+</div>
+
+<!-- Justification des hyperparamètres -->
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 class="section-title">⚙️ Justification des hyperparamètres</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;">
+
+    <div>
+      <h3 style="font-size:.92rem;font-weight:600;margin-bottom:.6rem;color:var(--primary,#1a5c9c);">Z-Score — window=30, seuils z=2/3</h3>
+      <p style="font-size:.85rem;color:var(--text,#333);line-height:1.6;margin:0;">
+        Une fenêtre de <strong>30 points</strong> offre un équilibre entre réactivité (détection rapide de dérives)
+        et stabilité statistique (réduction du bruit). Le seuil <strong>|z| ≥ 2</strong> déclenche une alerte WARNING
+        (probabilité ≈ 5 % sous loi normale), et <strong>|z| ≥ 3</strong> déclenche CRITICAL (probabilité ≈ 0.3 %).
+        Ces seuils sont des standards industriels reconnus (règle empirique 68-95-99.7).
+      </p>
+    </div>
+
+    <div>
+      <h3 style="font-size:.92rem;font-weight:600;margin-bottom:.6rem;color:var(--primary,#1a5c9c);">IQR — window=30, k=1.5/3.0</h3>
+      <p style="font-size:.85rem;color:var(--text,#333);line-height:1.6;margin:0;">
+        Le multiplicateur <strong>k=1.5</strong> (WARNING) correspond à la règle de Tukey standard pour les boîtes à moustaches,
+        identifiant les valeurs atypiques légères. <strong>k=3.0</strong> (CRITICAL) cible les valeurs extrêmes.
+        L'IQR est robuste aux valeurs aberrantes (contrairement à la moyenne), ce qui le rend complémentaire au Z-Score.
+      </p>
+    </div>
+
+    <div>
+      <h3 style="font-size:.92rem;font-weight:600;margin-bottom:.6rem;color:var(--primary,#1a5c9c);">Isolation Forest — window=100, contamination=0.05</h3>
+      <p style="font-size:.85rem;color:var(--text,#333);line-height:1.6;margin:0;">
+        La fenêtre de <strong>100 points</strong> garantit suffisamment de données pour entraîner les 100 arbres de décision
+        de manière stable. Le paramètre <strong>contamination=0.05</strong> (5 % d'anomalies attendues)
+        correspond au taux réel observé dans les données IoT industrielles.
+        La valeur <code>random_state=42</code> assure la reproductibilité des résultats.
+        Le réentraînement toutes les 20 lectures (<code>retrain_every=20</code>) maintient l'adaptation au contexte courant
+        sans surcharge CPU.
+      </p>
+    </div>
+
+    <div>
+      <h3 style="font-size:.92rem;font-weight:600;margin-bottom:.6rem;color:var(--primary,#1a5c9c);">Règles métier — seuils fixes par capteur</h3>
+      <p style="font-size:.85rem;color:var(--text,#333);line-height:1.6;margin:0;">
+        Les seuils sont définis par expertise métier (normes eau potable WHO/OMS) :
+        température 20–30 °C normal, pH 6.5–8.5 acceptable, turbidité &lt; 5 NTU sûre.
+        Cette approche garantit une <strong>précision maximale</strong> pour les anomalies connues
+        mais ne détecte pas les dérives progressives ni les patterns inhabituels.
+        Elle sert de référence de base pour comparer les méthodes statistiques.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<!-- Interprétation -->
+<div class="card">
+  <h2 class="section-title">💡 Interprétation et recommandations</h2>
+  <div style="font-size:.88rem;color:var(--text,#333);line-height:1.7;">
+    <ul style="margin:0;padding-left:1.2rem;">
+      <li><strong>Règles métier</strong> : haute précision sur les violations de seuils explicites, mais aveugle aux anomalies contextuelles et dérives.</li>
+      <li><strong>Z-Score</strong> : efficace sur les signaux stationnaires. Sensible aux changements de régime qui peuvent fausser la moyenne.</li>
+      <li><strong>IQR</strong> : plus robuste que le Z-Score face aux valeurs extrêmes persistantes. Idéal en présence de distributions asymétriques.</li>
+      <li><strong>Isolation Forest</strong> : seul détecteur <em>non-supervisé</em> capable d'apprendre des patterns complexes. Nécessite {{ warmup_readings }} lectures de warmup pour converger.</li>
+    </ul>
+    <p style="margin:.8rem 0 0;">
+      Le moteur utilise une stratégie <strong>worst-case</strong> : le niveau le plus sévère parmi les 5 détecteurs est retenu
+      (Rules + ZScore + IQR + IF univarié + IF multivarié),
+      maximisant le rappel au prix d'un léger surcoût en faux positifs.
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const detectors  = [{% for key, m in metrics.items() %}"{{ m.name }}"{% if not loop.last %},{% endif %}{% endfor %}];
+const precisions = [{% for key, m in metrics.items() %}{{ m.precision_mean }}{% if not loop.last %},{% endif %}{% endfor %}];
+const recalls    = [{% for key, m in metrics.items() %}{{ m.recall_mean }}{% if not loop.last %},{% endif %}{% endfor %}];
+const f1scores   = [{% for key, m in metrics.items() %}{{ m.f1_mean }}{% if not loop.last %},{% endif %}{% endfor %}];
+const windowSizes = {{ window_sizes | tojson }};
+const f1ZScore   = {{ sensitivity.zscore | tojson }};
+const f1IQR      = {{ sensitivity.iqr | tojson }};
+
+// ── Barres (moyennes bootstrap) ────────────────────────────────────────
+new Chart(document.getElementById('barChart'), {
+  type: 'bar',
+  data: {
+    labels: detectors,
+    datasets: [
+      { label: 'Précision', data: precisions, backgroundColor: 'rgba(26,92,156,.75)', borderRadius: 4 },
+      { label: 'Rappel',    data: recalls,    backgroundColor: 'rgba(39,174,96,.75)',  borderRadius: 4 },
+      { label: 'F1',        data: f1scores,   backgroundColor: 'rgba(243,156,18,.75)', borderRadius: 4 },
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      y: { beginAtZero: true, max: 1, ticks: { callback: v => (v*100).toFixed(0)+'%' } }
+    }
+  }
+});
+
+// ── Radar ──────────────────────────────────────────────────────────────
+const radarColors = [
+  'rgba(26,92,156,.7)', 'rgba(39,174,96,.7)', 'rgba(231,76,60,.7)', 'rgba(243,156,18,.7)'
+];
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: ['Précision', 'Rappel', 'F1'],
+    datasets: detectors.map((name, i) => ({
+      label: name,
+      data: [precisions[i], recalls[i], f1scores[i]],
+      backgroundColor: radarColors[i % radarColors.length].replace('.7', '.15'),
+      borderColor: radarColors[i % radarColors.length],
+      borderWidth: 2,
+      pointRadius: 4,
+    }))
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      r: { beginAtZero: true, max: 1, ticks: { callback: v => (v*100).toFixed(0)+'%', stepSize: 0.2 } }
+    }
+  }
+});
+
+// ── Sensibilité : F1 = f(window_size) ──────────────────────────────────
+new Chart(document.getElementById('sensitivityChart'), {
+  type: 'line',
+  data: {
+    labels: windowSizes,
+    datasets: [
+      {
+        label: 'Z-Score F1',
+        data: f1ZScore,
+        borderColor: 'rgba(26,92,156,1)',
+        backgroundColor: 'rgba(26,92,156,.1)',
+        borderWidth: 2,
+        pointRadius: 5,
+        tension: 0.3,
+        fill: true,
+      },
+      {
+        label: 'IQR F1',
+        data: f1IQR,
+        borderColor: 'rgba(39,174,96,1)',
+        backgroundColor: 'rgba(39,174,96,.1)',
+        borderWidth: 2,
+        pointRadius: 5,
+        tension: 0.3,
+        fill: true,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.raw * 100).toFixed(1) + '%' } }
+    },
+    scales: {
+      x: { title: { display: true, text: 'Taille de fenêtre (window_size)' } },
+      y: { beginAtZero: true, max: 1, ticks: { callback: v => (v*100).toFixed(0)+'%' },
+           title: { display: true, text: 'F1-Score' } }
+    }
+  }
+});
+</script>
+{% endblock %}

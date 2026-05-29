@@ -3,7 +3,10 @@
 {% block title %}Paramètres{% endblock %}
 
 {% block content %}
-<h1 class="page-title">⚙️ Paramètres</h1>
+<div class="page-header">
+  <h1 class="page-title">⚙️ Paramètres</h1>
+  <p class="page-subtitle">Configuration des seuils, notifications, sécurité et capteurs</p>
+</div>
 
 <!-- Onglets -->
 <div class="tab-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1.5rem;flex-wrap:wrap;">
@@ -147,7 +150,128 @@
       </div>
     </div>
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Section Telegram
+       ═══════════════════════════════════════════════════════ -->
+  <div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>🤖 Notifications Telegram</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+      Envoi d'alertes via un bot Telegram. Créez un bot avec @BotFather, récupérez le token et le chat_id.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Bot Token</label>
+        <input type="password" id="tg-token" placeholder="123456:ABCdef..." autocomplete="off"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Chat ID</label>
+        <input type="text" id="tg-chat" placeholder="-100123456789"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Niveau minimum</label>
+        <select id="tg-level" style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+          <option value="CRITICAL">CRITICAL seulement</option>
+          <option value="WARNING">WARNING et CRITICAL</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" id="tg-active"> Activer Telegram
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="saveTelegram()">💾 Enregistrer</button>
+      <span id="tg-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
 </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Section MQTT
+       ═══════════════════════════════════════════════════════ -->
+  <div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>📡 Broker MQTT</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+      Publication des alertes et lectures sur un broker MQTT (ex: Mosquitto, HiveMQ).
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.8rem;margin-bottom:.8rem;">
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Broker (hôte)</label>
+        <input type="text" id="mq-broker" placeholder="localhost"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Port</label>
+        <input type="number" id="mq-port" value="1883"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Préfixe de topic</label>
+        <input type="text" id="mq-prefix" placeholder="iot"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Utilisateur</label>
+        <input type="text" id="mq-user"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+      <div>
+        <label style="display:block;font-size:.8rem;margin-bottom:.3rem;">Mot de passe</label>
+        <input type="password" id="mq-pass" autocomplete="new-password"
+          style="width:100%;padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.88rem;">
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" id="mq-active"> Activer MQTT
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="saveMqtt()">💾 Enregistrer</button>
+      <span id="mq-status" style="font-size:.8rem;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
+  <!-- ─────────────────────────────────────────────────────────
+       Section Escalade automatique
+       ───────────────────────────────────────────────────────── -->
+  <div class="card" style="margin-top:1.5rem;">
+  <div class="card-header"><h3>🔺 Escalade automatique</h3></div>
+  <div class="card-body" style="padding:1.2rem;">
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1rem;">
+      Les alertes WARNING non-acquittées sont automatiquement promues en CRITICAL après le délai configuré.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.8rem;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:.8rem;color:var(--muted);display:block;margin-bottom:.3rem;">Délai avant escalade (minutes)</label>
+        <input type="number" id="esc-delay" class="filter-group input" value="10" min="1" max="1440"
+               style="width:100%;padding:.5rem;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.4rem;">
+        <label style="font-size:.82rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;">
+          <input type="checkbox" id="esc-telegram"> Notifier Telegram
+        </label>
+        <label style="font-size:.82rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;">
+          <input type="checkbox" id="esc-webhook"> Notifier Webhook
+        </label>
+        <label style="font-size:.82rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;">
+          <input type="checkbox" id="esc-email"> Notifier Email
+        </label>
+        <label style="font-size:.82rem;cursor:pointer;display:flex;align-items:center;gap:.5rem;">
+          <input type="checkbox" id="esc-active"> Activer l'escalade
+        </label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.5rem;align-self:flex-end;">
+        <button class="btn btn-primary btn-sm" onclick="saveEscalation()">💾 Enregistrer</button>
+        <span id="esc-status" style="font-size:.8rem;color:var(--muted);"></span>
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /tab-notifications -->
 
 <!-- ═══════════════════════════════════════════════════════
      ONGLET 3 — RAPPORTS
@@ -534,6 +658,84 @@ async function saveEmail(){
   setTimeout(()=>st.textContent='',4000);
 }
 
+// ── Telegram ──────────────────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/telegram').then(r=>r.json()).catch(()=>({}));
+  if(document.getElementById('tg-token')) document.getElementById('tg-token').value='';
+  if(document.getElementById('tg-chat'))  document.getElementById('tg-chat').value=cfg.chat_id||'';
+  if(document.getElementById('tg-level')) document.getElementById('tg-level').value=cfg.min_level||'CRITICAL';
+  if(document.getElementById('tg-active'))document.getElementById('tg-active').checked=cfg.active||false;
+})();
+
+async function saveTelegram(){
+  const st=document.getElementById('tg-status'); st.textContent='Sauvegarde...';
+  const token=document.getElementById('tg-token').value;
+  const params=new URLSearchParams({
+    chat_id:   document.getElementById('tg-chat').value,
+    min_level: document.getElementById('tg-level').value,
+    active:    document.getElementById('tg-active').checked,
+  });
+  if(token) params.set('bot_token', token);
+  const r=await fetch('/api/config/telegram?'+params.toString(),{method:'POST'});
+  st.textContent=r.ok?'✓ Telegram enregistré':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  if(r.ok) document.getElementById('tg-token').value='';
+  setTimeout(()=>st.textContent='',4000);
+}
+
+// ── MQTT ──────────────────────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/mqtt').then(r=>r.json()).catch(()=>({}));
+  if(document.getElementById('mq-broker')) document.getElementById('mq-broker').value=cfg.broker||'localhost';
+  if(document.getElementById('mq-port'))   document.getElementById('mq-port').value=cfg.port||1883;
+  if(document.getElementById('mq-prefix')) document.getElementById('mq-prefix').value=cfg.topic_prefix||'iot';
+  if(document.getElementById('mq-user'))   document.getElementById('mq-user').value=cfg.username||'';
+  if(document.getElementById('mq-active')) document.getElementById('mq-active').checked=cfg.active||false;
+})();
+
+async function saveMqtt(){
+  const st=document.getElementById('mq-status'); st.textContent='Sauvegarde...';
+  const pass=document.getElementById('mq-pass').value;
+  const params=new URLSearchParams({
+    broker:       document.getElementById('mq-broker').value,
+    port:         document.getElementById('mq-port').value,
+    topic_prefix: document.getElementById('mq-prefix').value,
+    username:     document.getElementById('mq-user').value,
+    active:       document.getElementById('mq-active').checked,
+  });
+  if(pass) params.set('password', pass);
+  const r=await fetch('/api/config/mqtt?'+params.toString(),{method:'POST'});
+  st.textContent=r.ok?'✓ MQTT enregistré':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  if(r.ok) document.getElementById('mq-pass').value='';
+  setTimeout(()=>st.textContent='',4000);
+}
+
+// ── Escalade automatique ─────────────────────────────────────────
+(async()=>{
+  const cfg=await fetch('/api/config/escalation').then(r=>r.json()).catch(()=>({}));
+  document.getElementById('esc-delay').value=cfg.delay_minutes??10;
+  document.getElementById('esc-active').checked=cfg.active!==false;
+  document.getElementById('esc-telegram').checked=cfg.notify_telegram!==false;
+  document.getElementById('esc-webhook').checked=cfg.notify_webhook!==false;
+  document.getElementById('esc-email').checked=cfg.notify_email||false;
+})();
+
+async function saveEscalation(){
+  const st=document.getElementById('esc-status'); st.textContent='Sauvegarde...';
+  const params=new URLSearchParams({
+    active:          document.getElementById('esc-active').checked,
+    delay_minutes:   document.getElementById('esc-delay').value,
+    notify_telegram: document.getElementById('esc-telegram').checked,
+    notify_webhook:  document.getElementById('esc-webhook').checked,
+    notify_email:    document.getElementById('esc-email').checked,
+  });
+  const r=await fetch('/api/config/escalation?'+params.toString(),{method:'POST'});
+  st.textContent=r.ok?'✓ Escalade enregistrée':'✗ Erreur';
+  st.style.color=r.ok?'var(--success)':'var(--critical)';
+  setTimeout(()=>st.textContent='',4000);
+}
+
 // ── Rapport automatique ──────────────────────────────────────────
 (async()=>{
   const cfg=await fetch('/api/config/report-schedule').then(r=>r.json()).catch(()=>({}));
@@ -785,4 +987,202 @@ async function importIoT(){
     </div>
   </div>
 </div>
+
+<!-- ── Section Clés API Appareils ─────────────────────────────── -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <div><h3 class="card-title">🔑 Clés API Appareils</h3><p class="card-subtitle">Authentifiez vos capteurs IoT physiques via le header <code>X-Device-Key</code></p></div>
+    <button class="btn btn-primary btn-sm" onclick="showAddKeyModal()">+ Ajouter</button>
+  </div>
+  <div class="card-body">
+    <div id="device-keys-list" style="margin-top:.8rem;">Chargement...</div>
+  </div>
+</div>
+
+<!-- ── Section Sauvegardes ────────────────────────────────────── -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <div><h3 class="card-title">💾 Sauvegardes SQLite</h3><p class="card-subtitle">Backup automatique toutes les 6h — conserve les 24 dernières sauvegardes</p></div>
+    <button class="btn btn-primary btn-sm" onclick="backupNow()" id="backup-btn">Sauvegarder maintenant</button>
+  </div>
+  <div class="card-body">
+    <div id="backup-status" style="margin:.4rem 0;font-size:.83rem;color:var(--muted,#999);"></div>
+    <div id="backup-list" style="margin-top:.8rem;">Chargement...</div>
+  </div>
+</div>
+
+<!-- ── Section Capteurs Dynamiques ───────────────────────────── -->
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header">
+    <h3 class="card-title">📡 Capteurs dynamiques</h3>
+    <p class="card-subtitle">Modifier les seuils d'alerte par capteur (sensors_config.json)</p>
+  </div>
+  <div class="card-body">
+    <div id="sensors-config-list">Chargement...</div>
+  </div>
+</div>
+
+<script>
+// ── Clés API appareils ──────────────────────────────────────────
+async function loadDeviceKeys() {
+  try {
+    const r = await fetch('/api/config/device-keys');
+    const keys = await r.json();
+    const el = document.getElementById('device-keys-list');
+    if (!keys.length) { el.innerHTML = '<p style="color:var(--muted,#999);font-size:.85rem;">Aucune clé configurée</p>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.85rem;">
+      <thead><tr style="border-bottom:2px solid var(--border);">
+        <th style="padding:.4rem;text-align:left;">Nom</th>
+        <th style="padding:.4rem;text-align:left;">Appareil</th>
+        <th style="padding:.4rem;text-align:left;">Statut</th>
+        <th style="padding:.4rem;text-align:left;">Dernière utilisation</th>
+        <th style="padding:.4rem;text-align:left;">Actions</th>
+      </tr></thead>
+      <tbody>${keys.map(k => `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.4rem;">${k.name}</td>
+          <td style="padding:.4rem;">${k.device_id||'—'}</td>
+          <td style="padding:.4rem;"><span style="color:${k.active?'#27ae60':'#e74c3c'}">${k.active?'✓ Active':'✗ Inactive'}</span></td>
+          <td style="padding:.4rem;font-size:.78rem;color:var(--muted,#999);">${k.last_used_at?new Date(k.last_used_at).toLocaleString('fr-FR'):'Jamais'}</td>
+          <td style="padding:.4rem;"><button class="btn btn-danger btn-sm" onclick="deleteKey(${k.id})">Supprimer</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  } catch(e) { document.getElementById('device-keys-list').textContent = 'Erreur chargement : ' + e.message; }
+}
+
+function showAddKeyModal() {
+  const name = prompt('Nom de la clé (ex: Capteur-A01) :');
+  if (!name) return;
+  const device = prompt('ID appareil (optionnel) :') || '';
+  addKey(name, device);
+}
+
+async function addKey(name, device) {
+  try {
+    const r = await fetch(`/api/config/device-keys?name=${encodeURIComponent(name)}&device_id=${encodeURIComponent(device)}`, { method:'POST' });
+    const k = await r.json();
+    if (k.key) {
+      alert(`Clé créée ! Copiez-la maintenant, elle ne sera plus affichée :\n\n${k.key}`);
+    }
+    loadDeviceKeys();
+  } catch(e) { showToast('Erreur création clé : ' + e.message, 'error'); }
+}
+
+async function deleteKey(id) {
+  if (!confirm('Supprimer cette clé ?')) return;
+  try {
+    await fetch(`/api/config/device-keys/${id}`, { method:'DELETE' });
+    showToast('Clé supprimée', 'success');
+    loadDeviceKeys();
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
+}
+
+// ── Sauvegardes ────────────────────────────────────────────────
+async function loadBackups() {
+  try {
+    const r = await fetch('/api/config/backup/list');
+    const backups = await r.json();
+    const el = document.getElementById('backup-list');
+    if (!backups.length) { el.innerHTML = '<p style="color:var(--muted,#999);font-size:.85rem;">Aucune sauvegarde disponible</p>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+      <thead><tr style="border-bottom:2px solid var(--border);">
+        <th style="padding:.4rem;text-align:left;">Fichier</th>
+        <th style="padding:.4rem;text-align:left;">Taille</th>
+        <th style="padding:.4rem;text-align:left;">Date</th>
+      </tr></thead>
+      <tbody>${backups.slice(0,10).map(b => `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.4rem;font-family:monospace;font-size:.78rem;">${b.filename}</td>
+          <td style="padding:.4rem;">${b.size_kb} KB</td>
+          <td style="padding:.4rem;font-size:.78rem;color:var(--muted,#999);">${new Date(b.created).toLocaleString('fr-FR')}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  } catch(e) { document.getElementById('backup-list').textContent = 'Erreur : ' + e.message; }
+}
+
+async function backupNow() {
+  const st = document.getElementById('backup-status');
+  const btn = document.getElementById('backup-btn');
+  btn.disabled = true;
+  st.textContent = 'Sauvegarde en cours...';
+  try {
+    const r = await fetch('/api/config/backup/now', { method:'POST' });
+    const d = await r.json();
+    st.style.color = '#27ae60';
+    st.textContent = '✓ ' + (d.path || 'Backup créé');
+    loadBackups();
+  } catch(e) {
+    st.style.color = '#e74c3c';
+    st.textContent = '✗ Erreur : ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ── Capteurs dynamiques ────────────────────────────────────────
+async function loadSensorsConfig() {
+  try {
+    const r = await fetch('/api/config/sensors');
+    const cfg = await r.json();
+    const el = document.getElementById('sensors-config-list');
+    el.innerHTML = Object.entries(cfg).map(([name, s]) => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:.8rem;">
+        <h4 style="margin:0 0 .8rem;font-size:.9rem;">📡 ${name} <span style="font-weight:400;color:var(--muted,#999);">(${s.unit})</span></h4>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem;">
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:.2rem;">⚠ WARNING min</label>
+            <input id="sc-${name}-wmin" type="number" step="0.1" value="${s.warning?.min??s.warning_min??''}"
+              style="width:100%;padding:.3rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+          </div>
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:.2rem;">⚠ WARNING max</label>
+            <input id="sc-${name}-wmax" type="number" step="0.1" value="${s.warning?.max??s.warning_max??''}"
+              style="width:100%;padding:.3rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+          </div>
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:.2rem;">🔴 CRITICAL min</label>
+            <input id="sc-${name}-cmin" type="number" step="0.1" value="${s.critical?.min??s.critical_min??''}"
+              style="width:100%;padding:.3rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+          </div>
+          <div>
+            <label style="font-size:.75rem;font-weight:600;display:block;margin-bottom:.2rem;">🔴 CRITICAL max</label>
+            <input id="sc-${name}-cmax" type="number" step="0.1" value="${s.critical?.max??s.critical_max??''}"
+              style="width:100%;padding:.3rem .6rem;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text);font-size:.85rem;">
+          </div>
+        </div>
+        <div style="text-align:right;margin-top:.6rem;">
+          <button class="btn btn-primary btn-sm" onclick="saveSensorConfig('${name}')">💾 Enregistrer</button>
+        </div>
+        <div id="sc-status-${name}" style="font-size:.78rem;margin-top:.3rem;color:var(--muted,#999);"></div>
+      </div>`).join('');
+  } catch(e) { document.getElementById('sensors-config-list').textContent = 'Erreur : ' + e.message; }
+}
+
+async function saveSensorConfig(name) {
+  const wmin = document.getElementById(`sc-${name}-wmin`)?.value;
+  const wmax = document.getElementById(`sc-${name}-wmax`)?.value;
+  const cmin = document.getElementById(`sc-${name}-cmin`)?.value;
+  const cmax = document.getElementById(`sc-${name}-cmax`)?.value;
+  const st   = document.getElementById(`sc-status-${name}`);
+  st.textContent = 'Sauvegarde...';
+  try {
+    const params = new URLSearchParams();
+    if (wmin) params.set('warning_min', wmin);
+    if (wmax) params.set('warning_max', wmax);
+    if (cmin) params.set('critical_min', cmin);
+    if (cmax) params.set('critical_max', cmax);
+    const r = await fetch(`/api/config/sensors/${name}?${params}`, { method:'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    st.style.color = '#27ae60';
+    st.textContent = '✓ Enregistré';
+  } catch(e) {
+    st.style.color = '#e74c3c';
+    st.textContent = '✗ Erreur : ' + e.message;
+  }
+}
+
+// Charger au démarrage
+loadDeviceKeys();
+loadBackups();
+loadSensorsConfig();
+</script>
 {% endblock %}

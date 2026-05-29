@@ -60,31 +60,58 @@ class SimulatorScheduler:
             trigger="interval",
             seconds=self.interval_seconds,
             id="iot_simulator",
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=self.interval_seconds,
         )
         if self._db_factory:
             self._scheduler.add_job(
                 self._check_offline,
                 trigger="interval",
-                seconds=30,
+                seconds=60,
                 id="offline_check",
+                coalesce=True,
+                misfire_grace_time=30,
             )
             self._scheduler.add_job(
                 self._check_escalation,
                 trigger="interval",
-                seconds=60,
+                seconds=120,
                 id="escalation_check",
+                coalesce=True,
+                misfire_grace_time=60,
             )
             self._scheduler.add_job(
                 self._check_storm,
                 trigger="interval",
-                seconds=30,
+                seconds=60,
                 id="storm_check",
+                coalesce=True,
+                misfire_grace_time=30,
             )
             self._scheduler.add_job(
                 self._send_scheduled_report,
                 trigger="interval",
                 minutes=60,
                 id="scheduled_report",
+                coalesce=True,
+                misfire_grace_time=300,
+            )
+            self._scheduler.add_job(
+                self._run_backup,
+                trigger="interval",
+                hours=6,
+                id="auto_backup",
+                coalesce=True,
+                misfire_grace_time=600,
+            )
+            self._scheduler.add_job(
+                self._run_recalibration,
+                trigger="interval",
+                hours=6,
+                id="auto_recalibration",
+                coalesce=True,
+                misfire_grace_time=600,
             )
         self._scheduler.start()
         self._running = True
@@ -156,6 +183,29 @@ class SimulatorScheduler:
             send_scheduled_report(self._db_factory)
         except Exception as e:
             logger.error(f"Erreur rapport programmé : {e}")
+
+    def _run_backup(self):
+        try:
+            from ..alerts.backup import run_backup
+            path = run_backup()
+            if path:
+                logger.info(f"Backup automatique : {path}")
+        except Exception as e:
+            logger.error(f"Erreur backup automatique : {e}")
+
+    def _run_recalibration(self):
+        if not self._db_factory:
+            return
+        db = self._db_factory()
+        try:
+            from ..alerts.recalibration import recalibrate_thresholds
+            changes = recalibrate_thresholds(db)
+            if changes:
+                logger.info(f"Recalibration auto : {list(changes.keys())}")
+        except Exception as e:
+            logger.error(f"Erreur recalibration auto : {e}")
+        finally:
+            db.close()
 
     @staticmethod
     def _default_callback(readings: list[SensorReading]):

@@ -6,17 +6,32 @@ SQLite en dev, PostgreSQL en prod (via DATABASE_URL dans .env).
 """
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./alerts.db")
 
-# SQLite : désactiver check_same_thread pour FastAPI
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+_is_sqlite = DATABASE_URL.startswith("sqlite")
+
+# SQLite : désactiver check_same_thread + timeout 30s pour éviter "database is locked"
+connect_args = {"check_same_thread": False, "timeout": 30} if _is_sqlite else {}
 
 engine = SessionLocal = None
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    # SQLite : pool_size non applicable, on utilise StaticPool implicite
+)
+
+# Activer WAL mode sur SQLite pour autoriser les lectures concurrentes
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def set_wal_mode(dbapi_conn, _):
+        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+        dbapi_conn.execute("PRAGMA busy_timeout=30000")
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
@@ -44,6 +59,8 @@ def init_db():
         "ALTER TABLE alerts ADD COLUMN tags VARCHAR(200)",
         "ALTER TABLE audit_logs ADD COLUMN user VARCHAR(100)",
         "ALTER TABLE alerts ADD COLUMN ack_reason TEXT",
+        "ALTER TABLE alerts ADD COLUMN snoozed_until DATETIME",
+        "ALTER TABLE alerts ADD COLUMN escalated_at DATETIME",
     ]
     with engine.connect() as conn:
         for sql in migrations:

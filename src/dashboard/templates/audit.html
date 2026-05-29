@@ -3,10 +3,10 @@
 {% block title %}Journal d'audit{% endblock %}
 
 {% block content %}
-<h1 class="page-title">
-  📋 Journal d'audit
-  <span style="font-size:.8rem;font-weight:400;color:var(--muted);">{{ total }} entrée(s)</span>
-</h1>
+<div class="page-header">
+  <h1 class="page-title">🛡 Journal d'audit</h1>
+  <p class="page-subtitle">{{ total }} entrée(s) — actions acknowledge, resolve, delete, note, tag</p>
+</div>
 
 <!-- Filtres -->
 <form method="get" action="/audit">

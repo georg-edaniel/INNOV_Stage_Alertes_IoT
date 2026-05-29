@@ -3,9 +3,13 @@
 {% block title %}Alertes{% endblock %}
 
 {% block content %}
-<h1 class="page-title">🔔 Historique des alertes</h1>
+<div class="page-header">
+  <h1 class="page-title">🔔 Historique des alertes</h1>
+  <p class="page-subtitle">{{ total }} alerte(s) · {{ stats.critical }} critique(s) · {{ stats.warning }} warning(s) · {{ stats.resolved }} résolue(s)</p>
+</div>
 
 <!-- Filtres -->
+<div class="card" style="margin-bottom:1rem;padding:1rem;">
 <form method="get" action="/alerts">
   <div class="filters">
     <div class="filter-group">
@@ -53,6 +57,7 @@
     </div>
   </div>
 </form>
+</div>
 
 <!-- Stats rapides -->
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
@@ -121,6 +126,8 @@
           <td>{{ "%.2f"|format(a.z_score) if a.z_score else '—' }}</td>
           <td>
             {% if a.resolved %}<span class="badge badge-normal">Résolue</span>
+            {% elif a.snoozed_until %}<span class="badge" style="background:#9b59b6;color:#fff;">⏸ Snoozée</span>
+            {% elif a.escalated_at %}<span class="badge" style="background:#e74c3c;color:#fff;" title="Escaladé le {{ a.escalated_at[:19]|replace('T',' ') }}">🔺 Escaladée</span>
             {% elif a.acknowledged %}<span class="badge badge-ack">Acquittée</span>
             {% else %}<span class="badge badge-warning">Ouverte</span>{% endif %}
           </td>
@@ -132,6 +139,11 @@
               {% for tag in a.tags.split(',') %}
                 <span style="display:inline-block;font-size:.7rem;padding:.1rem .4rem;border-radius:4px;background:var(--border);margin:.1rem;">{{ tag }}</span>
               {% endfor %}
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap;">
+            {% if not a.resolved %}
+            <button class="btn btn-outline btn-sm" onclick="openSnooze({{ a.id }})" title="Snooze" style="font-size:.75rem;padding:.2rem .5rem;">⏸</button>
             {% endif %}
           </td>
         </tr>
@@ -158,6 +170,21 @@
   {% endif %}
 </div>
 {% endif %}
+
+<!-- Modal Snooze -->
+<div id="snooze-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:var(--card);border-radius:var(--radius);padding:1.5rem 2rem;max-width:340px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 1rem;font-size:1rem;">⏸ Snooze — Mettre en sourdine</h3>
+    <p style="font-size:.88rem;color:var(--muted);margin-bottom:1.2rem;">L'alerte sera masquée pendant la durée choisie.</p>
+    <div style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:1.2rem;">
+      <button class="btn btn-outline" onclick="confirmSnooze(15)">⏱ 15 minutes</button>
+      <button class="btn btn-outline" onclick="confirmSnooze(30)">⏱ 30 minutes</button>
+      <button class="btn btn-outline" onclick="confirmSnooze(60)">⏱ 1 heure</button>
+      <button class="btn btn-outline" onclick="confirmSnooze(240)">⏱ 4 heures</button>
+    </div>
+    <button class="btn btn-secondary" style="width:100%;" onclick="closeSnooze()">Annuler</button>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      Modal PDF
@@ -253,6 +280,22 @@ async function resolve(id) {
 }
 async function ackAll() {
   await fetch('/api/alerts/acknowledge-all', { method: 'PATCH' });
+  location.reload();
+}
+
+// ── Snooze ─────────────────────────────────────────────────────
+let _snoozeId = null;
+function openSnooze(id) {
+  _snoozeId = id;
+  document.getElementById('snooze-modal').style.display = 'flex';
+}
+function closeSnooze() {
+  document.getElementById('snooze-modal').style.display = 'none';
+}
+async function confirmSnooze(minutes) {
+  if (!_snoozeId) return;
+  await fetch(`/api/alerts/${_snoozeId}/snooze?minutes=${minutes}`, { method: 'PATCH' });
+  closeSnooze();
   location.reload();
 }
 

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% set active = "overlay" %}
+{% block title %}Overlay Capteurs{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">📊 Comparaison Multi-Capteurs (Overlay)</h1>
+  <p class="page-subtitle">Valeurs normalisées (Z-Score) superposées sur un même graphique</p>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header">
+    <h3 style="margin:0;">Valeurs normalisées — 60 dernières lectures</h3>
+    <small style="color:#999;">Z-Score = (valeur - moyenne) / écart-type. Permet de comparer des capteurs d'unités différentes.</small>
+  </div>
+  <div style="position:relative;height:380px;padding:.5rem 0;">
+    <canvas id="overlay-chart"></canvas>
+  </div>
+</div>
+
+<!-- Tableau valeurs brutes -->
+<div class="card">
+  <div class="card-header"><h3 style="margin:0;">Valeurs brutes (dernières lectures)</h3></div>
+  <div style="overflow-x:auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          {% for sensor in ["temperature","turbidity","ph"] %}
+          <th>{{ sensor }} (brut)</th>
+          <th>{{ sensor }} (z-score)</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% set all_lens = data.values()|map(attribute='raw')|map('length')|list %}
+        {% set max_len = all_lens|max if all_lens else 0 %}
+        {% for i in range([max_len, 20]|min) %}
+        <tr>
+          <td style="color:#999;font-size:.82rem;">{{ i + 1 }}</td>
+          {% for sensor in ["temperature","turbidity","ph"] %}
+          {% set raw = data[sensor]["raw"] %}
+          {% set zv  = data[sensor]["values"] %}
+          <td>{{ raw[i] if i < raw|length else '—' }}</td>
+          {% if i < zv|length %}
+          {% set zval = zv[i] %}
+          <td style="color:{% if zval > 2 or zval < -2 %}#e74c3c{% elif zval > 1 or zval < -1 %}#f39c12{% else %}#27ae60{% endif %};">
+            {{ zval }}
+          </td>
+          {% else %}
+          <td>—</td>
+          {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const overlayData = {{ data | tojson }};
+
+const COLORS = {
+  temperature: { border: '#e74c3c', bg: '#e74c3c22' },
+  turbidity:   { border: '#3498db', bg: '#3498db22' },
+  ph:          { border: '#27ae60', bg: '#27ae6022' },
+};
+
+const labels = overlayData.temperature?.times?.map((t, i) => i + 1) || [];
+
+const datasets = Object.entries(overlayData).map(([sensor, d]) => ({
+  label: sensor + ' (z-score)',
+  data: d.values,
+  borderColor: COLORS[sensor]?.border || '#666',
+  backgroundColor: COLORS[sensor]?.bg || '#66666622',
+  tension: 0.3,
+  pointRadius: 2,
+  fill: false,
+}));
+
+// Lignes de référence ±2σ et ±3σ
+const n = labels.length;
+if (n > 0) {
+  [{v: 3, color: '#e74c3c', dash: [6,3], label: '+3σ'},
+   {v: 2, color: '#f39c12', dash: [4,4], label: '+2σ'},
+   {v: -2, color: '#f39c12', dash: [4,4], label: '-2σ'},
+   {v: -3, color: '#e74c3c', dash: [6,3], label: '-3σ'}].forEach(({v, color, dash, label}) => {
+    datasets.push({
+      label, data: Array(n).fill(v),
+      borderColor: color, borderDash: dash,
+      pointRadius: 0, borderWidth: 1, fill: false,
+    });
+  });
+}
+
+new Chart(document.getElementById('overlay-chart'), {
+  type: 'line',
+  data: { labels, datasets },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: {
+        callbacks: {
+          label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}`
+        }
+      }
+    },
+    scales: {
+      x: { title: { display: true, text: 'Lecture' }, ticks: { maxTicksLimit: 15 } },
+      y: { title: { display: true, text: 'Z-Score' }, suggestedMin: -4, suggestedMax: 4 }
+    }
+  }
+});
+</script>
+{% endblock %}

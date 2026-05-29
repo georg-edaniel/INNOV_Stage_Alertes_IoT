@@ -1,0 +1,7 @@
+{
+  "active": true,
+  "delay_minutes": 15,
+  "notify_telegram": false,
+  "notify_email": false,
+  "notify_webhook": true
+}

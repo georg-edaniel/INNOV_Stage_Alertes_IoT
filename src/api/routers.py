@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..alerts.database import get_db
 from ..alerts.service import AlertService
-from .auth import get_current_user
+from .auth import get_current_user, can_write
 from ..detection.engine import AnomalyDetectionEngine
 from ..simulator.generator import IoTSimulator
 
@@ -31,6 +31,12 @@ logs_router      = APIRouter()
 sensors_router   = APIRouter()
 simulator_router = APIRouter()
 config_router    = APIRouter()
+
+
+def require_write(request: Request) -> None:
+    """Dépendance FastAPI — lève 403 si l'utilisateur n'a pas le droit d'écriture."""
+    if not can_write(request):
+        raise HTTPException(status_code=403, detail="Accès refusé : droits insuffisants (viewer)")
 
 
 # ── /api/alerts ────────────────────────────────────────────────────────────
@@ -109,6 +115,7 @@ def acknowledge_alert(
     request: Request,
     reason: str = Query("", description="Raison de l'acquittement"),
     db: Session = Depends(get_db),
+    _: None = Depends(require_write),
 ):
     alert = AlertService(db, user=get_current_user(request) or "système").acknowledge(alert_id, reason=reason)
     if not alert:
@@ -117,11 +124,35 @@ def acknowledge_alert(
 
 
 @alerts_router.patch("/{alert_id}/resolve")
-def resolve_alert(alert_id: int, request: Request, db: Session = Depends(get_db)):
+def resolve_alert(alert_id: int, request: Request, db: Session = Depends(get_db), _: None = Depends(require_write)):
     alert = AlertService(db, user=get_current_user(request) or "système").resolve(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alerte non trouvée")
     return {"message": "Alerte résolue", "alert": alert.to_dict()}
+
+
+@alerts_router.patch("/{alert_id}/snooze")
+def snooze_alert(
+    alert_id: int,
+    request: Request,
+    minutes: int = Query(30, ge=1, le=1440, description="Durée du snooze en minutes"),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_write),
+):
+    """Met en sourdine une alerte pendant N minutes."""
+    alert = AlertService(db, user=get_current_user(request) or "système").snooze(alert_id, minutes=minutes)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": f"Alerte snoozée {minutes} min", "alert": alert.to_dict()}
+
+
+@alerts_router.patch("/{alert_id}/unsnooze")
+def unsnooze_alert(alert_id: int, request: Request, db: Session = Depends(get_db), _: None = Depends(require_write)):
+    """Annule le snooze d'une alerte."""
+    alert = AlertService(db, user=get_current_user(request) or "système").unsnooze(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerte non trouvée")
+    return {"message": "Snooze annulé", "alert": alert.to_dict()}
 
 
 @alerts_router.patch("/{alert_id}/notes")
@@ -241,24 +272,51 @@ def delete_comment(alert_id: int, comment_id: int, db: Session = Depends(get_db)
 # ── /api/ingest — données réelles depuis capteurs externes ────
 ingest_router = APIRouter()
 
+def _validate_device_key(request: Request, db: Session) -> bool:
+    """Valide le header X-Device-Key si présent. Retourne True si valide ou aucune clé configurée."""
+    import hashlib
+    from ..alerts.models import DeviceKey
+    from datetime import datetime, timezone
+    header_key = request.headers.get("X-Device-Key", "")
+    if not header_key:
+        return True  # Pas de clé = accès libre (compatible rétroactivement)
+    key_hash = hashlib.sha256(header_key.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    k = db.query(DeviceKey).filter(
+        DeviceKey.key_hash == key_hash,
+        DeviceKey.active == True,
+    ).first()
+    if not k:
+        return False
+    if k.expires_at and k.expires_at < now:
+        return False
+    k.last_used_at = now
+    db.commit()
+    return True
+
+
 @ingest_router.post("")
 def ingest_reading(
+    request: Request,
     sensor: str  = Query(..., description="Nom du capteur : temperature | turbidity | ph"),
     value:  float = Query(..., description="Valeur mesurée"),
     unit:   str  = Query("",  description="Unité de mesure"),
-    api_key: str = Query("", description="Clé API optionnelle"),
+    api_key: str = Query("", description="Clé API optionnelle (legacy)"),
     db: Session = Depends(get_db),
 ):
     """
     Endpoint pour soumettre une lecture depuis un vrai capteur IoT.
     Exemple : POST /api/ingest?sensor=temperature&value=28.5&unit=°C
+    Header optionnel : X-Device-Key: <clé>
     """
+    if not _validate_device_key(request, db):
+        raise HTTPException(status_code=401, detail="Clé API appareil invalide ou expirée")
     VALID = {"temperature", "turbidity", "ph"}
     if sensor not in VALID:
         raise HTTPException(400, f"Capteur invalide — valeurs acceptées : {', '.join(VALID)}")
 
     from ..simulator.generator import SensorReading
-    reading = SensorReading(sensor=sensor, value=value, unit=unit or "?", scenario="external")
+    reading = SensorReading(sensor=sensor, value=value, scenario="external")
 
     result  = _engine.analyze(reading)
     svc     = AlertService(db, user="capteur_externe")
@@ -320,7 +378,7 @@ async def ingest_upload(
             skipped += 1; continue
         unit = str(row.get("unit","")).strip() or "?"
 
-        reading = SensorReading(sensor=sensor, value=value, unit=unit, scenario="import")
+        reading = SensorReading(sensor=sensor, value=value, scenario="import")
         result  = _engine.analyze(reading)
         alert   = svc.process(result, reading)
         created += 1
@@ -381,6 +439,14 @@ def get_comparison(
         from fastapi import HTTPException
         raise HTTPException(400, "period doit être 'week' ou 'month'")
     return AlertService(db).get_comparison(period=period)
+
+
+@logs_router.get("/composite")
+def get_composite_alerts(db: Session = Depends(get_db)):
+    """Liste des alertes composites (corrélation multi-capteurs)."""
+    svc = AlertService(db)
+    alerts = svc.get_all(sensor="composite", limit=50)
+    return {"alerts": [a.to_dict() for a in alerts], "count": len(alerts)}
 
 
 @logs_router.get("/audit")
@@ -1049,6 +1115,127 @@ def update_zone(
     return update_sensor_zone(sensor=sensor, zone=zone, label=label, lat=lat, lon=lon)
 
 
+@config_router.get("/telegram")
+def get_telegram_config():
+    """Retourne la configuration Telegram (token masqué)."""
+    from ..alerts.telegram_notifier import get_config
+    return get_config()
+
+
+@config_router.post("/telegram")
+def set_telegram_config(
+    bot_token: str  = Query(""),
+    chat_id:   str  = Query(""),
+    active:    bool = Query(False),
+    min_level: str  = Query("CRITICAL", description="CRITICAL | WARNING"),
+):
+    """Configure la notification Telegram."""
+    from ..alerts.telegram_notifier import set_config
+    if min_level not in ("CRITICAL", "WARNING"):
+        raise HTTPException(400, "min_level doit être CRITICAL ou WARNING")
+    return set_config(
+        bot_token=bot_token or None,
+        chat_id=chat_id or None,
+        active=active,
+        min_level=min_level,
+    )
+
+
+@config_router.get("/mqtt")
+def get_mqtt_config():
+    """Retourne la configuration MQTT (mot de passe masqué)."""
+    from ..alerts.mqtt_publisher import get_config
+    return get_config()
+
+
+@config_router.post("/mqtt")
+def set_mqtt_config(
+    broker:       str  = Query("localhost"),
+    port:         int  = Query(1883),
+    username:     str  = Query(""),
+    password:     str  = Query(""),
+    active:       bool = Query(False),
+    topic_prefix: str  = Query("iot"),
+):
+    """Configure le broker MQTT."""
+    from ..alerts.mqtt_publisher import set_config
+    return set_config(
+        broker=broker, port=port,
+        username=username or None,
+        password=password if password != "***" else None,
+        active=active,
+        topic_prefix=topic_prefix,
+    )
+
+
+@config_router.get("/thresholds/time-rules")
+def get_time_rules(sensor: str = Query(..., description="temperature | turbidity | ph")):
+    """Retourne les règles horaires pour un capteur."""
+    from ..alerts.threshold_config import get_time_rules
+    if sensor not in ("temperature", "turbidity", "ph"):
+        raise HTTPException(400, "Capteur invalide")
+    return {"sensor": sensor, "time_rules": get_time_rules(sensor)}
+
+
+@config_router.post("/thresholds/time-rules")
+def set_time_rules(
+    sensor: str = Query(..., description="temperature | turbidity | ph"),
+    rules:  str = Query("[]", description="JSON array de règles horaires"),
+):
+    """Met à jour les règles horaires pour un capteur."""
+    import json as _json
+    from ..alerts.threshold_config import update_time_rules
+    if sensor not in ("temperature", "turbidity", "ph"):
+        raise HTTPException(400, "Capteur invalide")
+    try:
+        time_rules = _json.loads(rules)
+        if not isinstance(time_rules, list):
+            raise ValueError("tableau attendu")
+    except Exception as e:
+        raise HTTPException(400, f"JSON invalide : {e}")
+    result = update_time_rules(sensor, time_rules)
+    return {"sensor": sensor, "time_rules": result.get("time_rules", [])}
+
+
+@config_router.get("/escalation")
+def get_escalation_config():
+    """Retourne la configuration d'escalade automatique."""
+    import json, os
+    path = os.path.join(os.getcwd(), "escalation_config.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {"active": True, "delay_minutes": 10, "notify_telegram": True,
+                "notify_email": False, "notify_webhook": True}
+
+
+@config_router.post("/escalation")
+def set_escalation_config(
+    active:           bool = Query(True),
+    delay_minutes:    int  = Query(10, ge=1, le=1440),
+    notify_telegram:  bool = Query(True),
+    notify_email:     bool = Query(False),
+    notify_webhook:   bool = Query(True),
+):
+    """Met à jour la configuration d'escalade automatique."""
+    import json, os
+    cfg = {
+        "active": active,
+        "delay_minutes": delay_minutes,
+        "notify_telegram": notify_telegram,
+        "notify_email": notify_email,
+        "notify_webhook": notify_webhook,
+    }
+    path = os.path.join(os.getcwd(), "escalation_config.json")
+    try:
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        raise HTTPException(500, f"Erreur sauvegarde : {e}")
+    return cfg
+
+
 @config_router.post("/email")
 def set_email_config(
     smtp_host: str  = Query("smtp.gmail.com"),
@@ -1066,3 +1253,163 @@ def set_email_config(
         username=username, password=password if password != "***" else None,
         from_addr=from_addr, to_addr=to_addr, active=active,
     )
+
+
+# ── /api/config/device-keys ─────────────────────────────────────────────────
+
+@config_router.get("/device-keys")
+def list_device_keys(db: Session = Depends(get_db)):
+    """Liste toutes les clés API appareils."""
+    from ..alerts.models import DeviceKey
+    keys = db.query(DeviceKey).order_by(DeviceKey.created_at.desc()).all()
+    return [k.to_dict() for k in keys]
+
+
+@config_router.post("/device-keys")
+def create_device_key(
+    name:      str = Query(..., description="Nom de la clé"),
+    device_id: str = Query("", description="Identifiant appareil"),
+    _: None = Depends(require_write),
+    db: Session = Depends(get_db),
+):
+    """Crée une nouvelle clé API pour un appareil."""
+    import secrets, hashlib
+    from ..alerts.models import DeviceKey
+    raw = secrets.token_urlsafe(32)
+    key = DeviceKey(
+        name=name,
+        key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        device_id=device_id or None,
+        active=True,
+    )
+    db.add(key)
+    db.commit()
+    db.refresh(key)
+    d = key.to_dict()
+    d["key"] = raw  # affiché une seule fois
+    return d
+
+
+@config_router.delete("/device-keys/{key_id}")
+def delete_device_key(
+    key_id: int,
+    _: None = Depends(require_write),
+    db: Session = Depends(get_db),
+):
+    """Supprime une clé API appareil."""
+    from ..alerts.models import DeviceKey
+    k = db.query(DeviceKey).filter(DeviceKey.id == key_id).first()
+    if not k:
+        raise HTTPException(status_code=404, detail="Clé non trouvée")
+    db.delete(k)
+    db.commit()
+    return {"message": "Clé supprimée"}
+
+
+# ── /api/config/backup ───────────────────────────────────────────────────────
+
+@config_router.post("/backup/now")
+def backup_now(_: None = Depends(require_write)):
+    """Déclenche une sauvegarde immédiate de la base SQLite."""
+    from ..alerts.backup import run_backup
+    path = run_backup()
+    if path is None:
+        raise HTTPException(status_code=500, detail="Backup échoué")
+    return {"message": "Backup créé", "path": path}
+
+
+@config_router.get("/backup/list")
+def list_backups_endpoint():
+    """Liste les sauvegardes disponibles."""
+    from ..alerts.backup import list_backups
+    return list_backups()
+
+
+# ── /api/config/thresholds/recalibrate ──────────────────────────────────────
+
+@config_router.post("/thresholds/recalibrate")
+def recalibrate_now(
+    window_hours: int = Query(24, ge=1, le=720),
+    _: None = Depends(require_write),
+    db: Session = Depends(get_db),
+):
+    """Lance la recalibration automatique des seuils."""
+    from ..alerts.recalibration import recalibrate_thresholds
+    changes = recalibrate_thresholds(db, window_hours=window_hours)
+    return {"message": "Recalibration terminée", "changes": changes}
+
+
+# ── /api/config/sensors ──────────────────────────────────────────────────────
+
+@config_router.get("/sensors")
+def get_sensors_config():
+    """Retourne la configuration des capteurs (sensors_config.json)."""
+    import json
+    from pathlib import Path
+    cfg_file = Path(__file__).parent.parent.parent / "sensors_config.json"
+    if cfg_file.exists():
+        return json.loads(cfg_file.read_text(encoding="utf-8"))
+    # Fallback vers SENSOR_CONFIG
+    try:
+        from ..simulator.config import SENSOR_CONFIG
+        return SENSOR_CONFIG
+    except Exception:
+        return {}
+
+
+@config_router.post("/sensors/{sensor_name}")
+def update_sensor_config(
+    sensor_name: str,
+    warning_min:  float | None = Query(None),
+    warning_max:  float | None = Query(None),
+    critical_min: float | None = Query(None),
+    critical_max: float | None = Query(None),
+    unit:         str   | None = Query(None),
+    _: None = Depends(require_write),
+):
+    """Met à jour la configuration d'un capteur dans sensors_config.json."""
+    import json
+    from pathlib import Path
+    cfg_file = Path(__file__).parent.parent.parent / "sensors_config.json"
+    try:
+        from ..simulator.config import SENSOR_CONFIG
+        cfg = json.loads(cfg_file.read_text(encoding="utf-8")) if cfg_file.exists() else dict(SENSOR_CONFIG)
+    except Exception:
+        cfg = {}
+    if sensor_name not in cfg:
+        raise HTTPException(status_code=404, detail=f"Capteur '{sensor_name}' inconnu")
+    if warning_min  is not None: cfg[sensor_name]["warning_min"]  = warning_min
+    if warning_max  is not None: cfg[sensor_name]["warning_max"]  = warning_max
+    if critical_min is not None: cfg[sensor_name]["critical_min"] = critical_min
+    if critical_max is not None: cfg[sensor_name]["critical_max"] = critical_max
+    if unit         is not None: cfg[sensor_name]["unit"]         = unit
+    cfg_file.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    return cfg[sensor_name]
+
+
+# ── /api/predict/history ────────────────────────────────────────────────────
+
+@config_router.get("/predict/history")
+def get_predict_history(
+    sensor: str | None = Query(None),
+    limit:  int        = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Retourne l'historique des prédictions."""
+    from ..alerts.models import PredictionRecord
+    q = db.query(PredictionRecord)
+    if sensor:
+        q = q.filter(PredictionRecord.sensor == sensor)
+    records = q.order_by(PredictionRecord.created_at.desc()).limit(limit).all()
+    return [r.to_dict() for r in records]
+
+
+# ── /api/lang ────────────────────────────────────────────────────────────────
+
+@config_router.post("/lang")
+def set_lang(lang: str = Query("fr", pattern="^(fr|en)$")):
+    """Change la langue de l'interface (cookie lang)."""
+    from fastapi.responses import JSONResponse
+    resp = JSONResponse({"lang": lang})
+    resp.set_cookie("lang", lang, max_age=86400 * 365, httponly=False, samesite="lax")
+    return resp

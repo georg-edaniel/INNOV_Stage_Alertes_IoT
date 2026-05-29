@@ -1,7 +1,26 @@
 """
 Seuils normaux et critiques pour chaque capteur IoT.
 Source : normes environnementales standard (eau potable / industrielle).
+
+Le fichier sensors_config.json à la racine du projet permet de surcharger
+ces valeurs à chaud (hot-reload via get_sensor_config()).
 """
+
+import json
+from pathlib import Path
+
+_SENSORS_FILE = Path(__file__).parent.parent.parent / "sensors_config.json"
+
+
+def get_sensor_config() -> dict:
+    """Retourne la configuration des capteurs (hot-reload depuis sensors_config.json)."""
+    if _SENSORS_FILE.exists():
+        try:
+            return json.loads(_SENSORS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return dict(SENSOR_CONFIG)
+
 
 SENSOR_CONFIG = {
     "temperature": {

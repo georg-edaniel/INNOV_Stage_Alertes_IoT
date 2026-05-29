@@ -20,12 +20,13 @@ class DetectionResult:
     value:         float
     unit:          str
     level:         AlertLevel
-    method:        str          # "rules" | "zscore" | "iqr"
+    method:        str          # "rules" | "zscore" | "iqr" | "ensemble" | ...
     reason:        str          # Message lisible par un humain
     timestamp:     datetime     = field(default_factory=lambda: datetime.now(timezone.utc))
     z_score:       float | None = None
     expected_min:  float | None = None
     expected_max:  float | None = None
+    confidence:    float        = 1.0   # Confiance du détecteur [0.0–1.0]
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +40,7 @@ class DetectionResult:
             "z_score":      self.z_score,
             "expected_min": self.expected_min,
             "expected_max": self.expected_max,
+            "confidence":   self.confidence,
         }
 
     def is_anomaly(self) -> bool:

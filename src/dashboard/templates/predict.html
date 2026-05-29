@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% set active = "predict" %}
+{% block title %}Prédiction de dérive{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">📈 Prédiction de dérive capteurs</h1>
+  <p class="page-subtitle">Projection ARIMA sur les 60 dernières lectures · 20 pas dans le futur</p>
+</div>
+
+<div class="info-box">
+  Projection par <strong>régression linéaire</strong> sur les 60 dernières lectures —
+  <strong>20 pas</strong> projetés dans le futur · Seuils WARNING/CRITICAL superposés.
+  <span style="font-size:.82rem;opacity:.8;">Mis à jour à chaque chargement de page.</span>
+</div>
+
+<!-- KPIs par capteur -->
+<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem;">
+  {% for sensor, pred in predictions.items() %}
+  {% set sensor_label = {"temperature": "🌡 Température", "turbidity": "💧 Turbidité", "ph": "⚗ pH"}[sensor] %}
+  <div class="kpi-card {% if pred.status == 'insufficient' %}warning{% elif pred.steps_critical is not none %}critical{% elif pred.steps_warning is not none %}warning{% else %}success{% endif %}">
+    <div class="kpi-label">{{ sensor_label }}</div>
+    {% if pred.status == 'insufficient' %}
+      <div class="kpi-value" style="font-size:1.4rem;">—</div>
+      <div class="kpi-sub">Données insuffisantes</div>
+    {% else %}
+      <div class="kpi-value">{{ pred.current }} {{ pred.unit }}</div>
+      <div class="kpi-sub">
+        {{ pred.trend_icon }} Pente : {{ pred.slope }} {{ pred.unit }}/lecture
+        {% if pred.steps_critical is not none %}
+          <br><span style="color:#e74c3c;font-weight:600;">⚠ CRITICAL dans ~{{ pred.steps_critical }} lectures</span>
+        {% elif pred.steps_warning is not none %}
+          <br><span style="color:#f39c12;font-weight:600;">⚠ WARNING dans ~{{ pred.steps_warning }} lectures</span>
+        {% else %}
+          <br><span style="color:#27ae60;">✔ Aucun seuil franchi dans les 20 prochaines lectures</span>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Graphiques par capteur -->
+{% for sensor, pred in predictions.items() %}
+{% set sensor_label = {"temperature": "🌡 Température", "turbidity": "💧 Turbidité", "ph": "⚗ pH"}[sensor] %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;">
+    <h2 class="section-title" style="margin:0;">{{ sensor_label }} — {{ pred.unit }}</h2>
+    {% if pred.status != 'insufficient' %}
+    <div style="display:flex;gap:.5rem;align-items:center;">
+      <span style="font-size:.82rem;padding:.25rem .6rem;border-radius:12px;
+        {% if pred.steps_critical is not none %}background:#fdecea;color:#e74c3c;
+        {% elif pred.steps_warning is not none %}background:#fef9e7;color:#f39c12;
+        {% else %}background:#eafaf1;color:#27ae60;{% endif %}">
+        {{ pred.trend_icon }}
+        {% if pred.steps_critical is not none %}Dérive critique ~{{ pred.steps_critical }} lectures
+        {% elif pred.steps_warning is not none %}Dérive warning ~{{ pred.steps_warning }} lectures
+        {% else %}Stable{% endif %}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if pred.status == 'insufficient' %}
+  <div style="padding:2rem;text-align:center;color:var(--muted,#888);">
+    Pas assez de données disponibles pour ce capteur (minimum 5 lectures requises).
+  </div>
+  {% else %}
+  <canvas id="chart-{{ sensor }}" height="120"></canvas>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- Méthodologie -->
+<div class="card">
+  <h2 class="section-title">📐 Méthodologie</h2>
+  <div style="font-size:.87rem;color:var(--text,#333);line-height:1.7;">
+    <ul style="margin:0;padding-left:1.2rem;">
+      <li><strong>Régression linéaire</strong> (numpy.polyfit, degré 1) sur les 60 dernières lectures de chaque capteur.</li>
+      <li><strong>Projection de 20 pas</strong> : extrapolation de la droite de tendance dans le futur.</li>
+      <li><strong>Détection de franchissement</strong> : premier indice où la projection dépasse les seuils WARNING ou CRITICAL définis dans <code>SENSOR_CONFIG</code>.</li>
+      <li><strong>Limites</strong> : la régression linéaire est sensible aux pics ponctuels. Pour une analyse plus robuste, utilisez la page <a href="/report/detection">Évaluation détecteurs</a>.</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const PREDICTIONS = {{ predictions | tojson }};
+
+const COLORS = {
+  temperature: { line: 'rgb(231,76,60)', fill: 'rgba(231,76,60,.08)' },
+  turbidity:   { line: 'rgb(52,152,219)', fill: 'rgba(52,152,219,.08)' },
+  ph:          { line: 'rgb(39,174,96)', fill: 'rgba(39,174,96,.08)' },
+};
+
+Object.entries(PREDICTIONS).forEach(([sensor, pred]) => {
+  if (pred.status === 'insufficient') return;
+
+  const ctx = document.getElementById('chart-' + sensor);
+  if (!ctx) return;
+
+  const histLen  = pred.values.length;
+  const histLabels  = pred.values.map((_, i) => '-' + (histLen - i));
+  const futureLabels = pred.future.map((_, i) => '+' + (i + 1));
+  const allLabels    = [...histLabels, ...futureLabels];
+
+  const histData   = [...pred.values, ...Array(pred.future.length).fill(null)];
+  const futureData = [...Array(pred.values.length).fill(null), ...pred.future];
+
+  const cfg   = pred.thresholds;
+  const col   = COLORS[sensor] || { line: 'rgb(100,100,200)', fill: 'rgba(100,100,200,.08)' };
+  const total = allLabels.length;
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: allLabels,
+      datasets: [
+        {
+          label: 'Historique',
+          data: histData,
+          borderColor: col.line,
+          backgroundColor: col.fill,
+          borderWidth: 2,
+          pointRadius: 2,
+          tension: 0.3,
+          fill: true,
+          spanGaps: false,
+        },
+        {
+          label: 'Projection',
+          data: futureData,
+          borderColor: col.line,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 3,
+          tension: 0.3,
+          fill: false,
+          spanGaps: false,
+        },
+        {
+          label: 'Seuil WARNING max',
+          data: Array(total).fill(cfg.warning.max),
+          borderColor: 'rgba(243,156,18,.6)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Seuil WARNING min',
+          data: Array(total).fill(cfg.warning.min),
+          borderColor: 'rgba(243,156,18,.6)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Seuil CRITICAL max',
+          data: Array(total).fill(cfg.critical.max),
+          borderColor: 'rgba(231,76,60,.5)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [2, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Seuil CRITICAL min',
+          data: Array(total).fill(cfg.critical.min),
+          borderColor: 'rgba(231,76,60,.5)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [2, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.raw !== null ? ctx.dataset.label + ': ' + ctx.raw + ' ' + pred.unit : null
+          }
+        },
+        annotation: {}
+      },
+      scales: {
+        x: {
+          ticks: { maxTicksLimit: 10, font: { size: 10 } },
+          grid: { display: false }
+        },
+        y: {
+          title: { display: true, text: pred.unit },
+          ticks: { font: { size: 10 } }
+        }
+      }
+    }
+  });
+});
+</script>
+
+{% if history %}
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-header">
+    <h3 class="card-title">📜 Historique des prédictions</h3>
+    <p class="card-subtitle">10 dernières prédictions générées</p>
+  </div>
+  <div class="card-body">
+    <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border);">
+          <th style="padding:.4rem;text-align:left;">Capteur</th>
+          <th style="padding:.4rem;text-align:left;">Méthode</th>
+          <th style="padding:.4rem;text-align:left;">Horizon</th>
+          <th style="padding:.4rem;text-align:left;">Min prévu</th>
+          <th style="padding:.4rem;text-align:left;">Max prévu</th>
+          <th style="padding:.4rem;text-align:left;">Généré le</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:.4rem;"><strong>{{ h.sensor }}</strong></td>
+          <td style="padding:.4rem;"><span style="background:{% if h.method=='arima' %}#1a5c9c{% else %}#555{% endif %};color:#fff;padding:.1rem .4rem;border-radius:4px;font-size:.75rem;">{{ h.method|upper }}</span></td>
+          <td style="padding:.4rem;">{{ h.horizon }} pts</td>
+          <td style="padding:.4rem;">{{ (h['values']|min)|round(2) if h['values'] else '—' }}</td>
+          <td style="padding:.4rem;">{{ (h['values']|max)|round(2) if h['values'] else '—' }}</td>
+          <td style="padding:.4rem;color:var(--muted,#999);font-size:.78rem;">{{ h.created_at[:16] if h.created_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

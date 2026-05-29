@@ -34,6 +34,48 @@ def get_sensor(sensor: str) -> dict:
     return get_all().get(sensor, SENSOR_CONFIG.get(sensor, {}))
 
 
+def get_current_thresholds(sensor: str) -> dict:
+    """
+    Retourne les seuils actifs pour l'heure courante.
+    Si des règles horaires (time_rules) sont définies dans _overrides pour ce capteur,
+    elles écrasent les valeurs correspondantes.
+    """
+    from datetime import datetime
+    base = get_sensor(sensor)
+    time_rules = _overrides.get(sensor, {}).get("time_rules", [])
+    if not time_rules:
+        return base
+    now_hour = datetime.now().hour
+    merged = dict(base)
+    for rule in time_rules:
+        h_start = rule.get("hours_start", 0)
+        h_end   = rule.get("hours_end",   24)
+        if h_start <= now_hour < h_end:
+            # Appliquer les overrides de la règle
+            for zone in ("normal", "warning", "critical"):
+                if zone in rule:
+                    merged.setdefault(zone, {}).update(rule[zone])
+            # Raccourcis plats (ex: warning_max)
+            for zone in ("normal", "warning", "critical"):
+                for bound in ("min", "max"):
+                    key = f"{zone}_{bound}"
+                    if key in rule:
+                        merged.setdefault(zone, {})[bound] = rule[key]
+    return merged
+
+
+def update_time_rules(sensor: str, time_rules: list) -> dict:
+    """Met à jour les règles horaires pour un capteur."""
+    _overrides.setdefault(sensor, {})["time_rules"] = time_rules
+    _save()
+    return _overrides[sensor]
+
+
+def get_time_rules(sensor: str) -> list:
+    """Retourne les règles horaires pour un capteur."""
+    return _overrides.get(sensor, {}).get("time_rules", [])
+
+
 def update_sensor(sensor: str, zone: str, min_val: float | None, max_val: float | None) -> dict:
     """Met à jour un seuil pour un capteur/zone, persiste et enregistre l'historique."""
     # Valeurs avant modification

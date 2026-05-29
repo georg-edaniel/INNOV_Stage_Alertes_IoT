@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% set active = "cusum" %}
+{% block title %}CUSUM — Dérive cumulée{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">📉 CUSUM — Détection de dérive cumulée</h1>
+  <p class="page-subtitle">
+    Accumule les déviations successives pour détecter les dérives progressives invisibles au Z-Score.
+    <b>h</b> = seuil CRITICAL (5σ) · <b>h/2</b> = seuil WARNING (2.5σ)
+  </p>
+</div>
+
+<!-- Légende méthode -->
+<div class="card" style="margin-bottom:1.2rem;background:var(--bg-alt);">
+  <div class="card-body" style="padding:.9rem 1.2rem;display:flex;gap:2rem;flex-wrap:wrap;font-size:.85rem;">
+    <span><b style="color:#e74c3c;">C+</b> — accumulation de déviations positives (dérive à la hausse)</span>
+    <span><b style="color:#3498db;">C−</b> — accumulation de déviations négatives (dérive à la baisse)</span>
+    <span><span style="color:#e74c3c;">━━</span> Seuil CRITICAL (h)</span>
+    <span><span style="color:#f39c12;">- -</span> Seuil WARNING (h/2)</span>
+  </div>
+</div>
+
+{% set SENSORS = [
+  ("temperature", "🌡 Température", "#e74c3c", "#3498db"),
+  ("turbidity",   "💧 Turbidité",    "#e67e22", "#2980b9"),
+  ("ph",          "⚗ pH",            "#27ae60", "#8e44ad"),
+] %}
+
+{% for sensor, label, color_pos, color_neg in SENSORS %}
+{% set d = data[sensor] %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <h3 style="margin:0;">{{ label }}</h3>
+    {% if d.h %}
+    <div style="font-size:.82rem;color:var(--muted);display:flex;gap:1.2rem;">
+      <span>h = <b style="color:#e74c3c;">{{ "%.3f"|format(d.h) }}</b></span>
+      <span>h/2 = <b style="color:#f39c12;">{{ "%.3f"|format(d.h_warn) }}</b></span>
+      <span>Points : {{ d.cusum_pos|length }}</span>
+    </div>
+    {% else %}
+    <span style="font-size:.8rem;color:var(--muted);">Initialisation — pas assez de données</span>
+    {% endif %}
+  </div>
+  <div style="position:relative;height:260px;padding:.5rem 0;">
+    <canvas id="cusum-{{ sensor }}"></canvas>
+  </div>
+</div>
+{% endfor %}
+
+<!-- Tableau résumé -->
+<div class="card">
+  <div class="card-header"><h3 style="margin:0;">Résumé CUSUM par capteur</h3></div>
+  <div style="overflow-x:auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Capteur</th>
+          <th>Dernier C+</th>
+          <th>Dernier C−</th>
+          <th>Seuil h (CRITICAL)</th>
+          <th>Seuil h/2 (WARNING)</th>
+          <th>État</th>
+          <th>Points analysés</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sensor, label, color_pos, color_neg in SENSORS %}
+        {% set d = data[sensor] %}
+        {% set last_pos = d.cusum_pos[-1] if d.cusum_pos else None %}
+        {% set last_neg = d.cusum_neg[-1] if d.cusum_neg else None %}
+        <tr>
+          <td><b>{{ label }}</b></td>
+          <td style="color:#e74c3c;">{{ "%.3f"|format(last_pos) if last_pos is not none else '—' }}</td>
+          <td style="color:#3498db;">{{ "%.3f"|format(last_neg) if last_neg is not none else '—' }}</td>
+          <td>{{ "%.3f"|format(d.h) if d.h else '—' }}</td>
+          <td>{{ "%.3f"|format(d.h_warn) if d.h_warn else '—' }}</td>
+          <td>
+            {% if not d.h %}
+              <span class="badge" style="background:var(--border);color:var(--muted);">Init.</span>
+            {% elif last_pos is not none and (last_pos > d.h or last_neg > d.h) %}
+              <span class="badge badge-critical">DÉRIVE CRITIQUE</span>
+            {% elif last_pos is not none and (last_pos > d.h_warn or last_neg > d.h_warn) %}
+              <span class="badge badge-warning">Dérive précoce</span>
+            {% else %}
+              <span class="badge badge-normal">Normal</span>
+            {% endif %}
+          </td>
+          <td style="color:var(--muted);">{{ d.cusum_pos|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const cusumData = {{ data | tojson }};
+
+const COLORS = {
+  temperature: { pos: '#e74c3c', neg: '#3498db' },
+  turbidity:   { pos: '#e67e22', neg: '#2980b9' },
+  ph:          { pos: '#27ae60', neg: '#8e44ad' },
+};
+
+['temperature','turbidity','ph'].forEach(sensor => {
+  const d   = cusumData[sensor];
+  const ctx = document.getElementById('cusum-' + sensor);
+  if (!ctx || !d.cusum_pos.length) return;
+
+  const n      = d.cusum_pos.length;
+  const labels = Array.from({length: n}, (_, i) => i + 1);
+  const h      = d.h;
+  const h_warn = d.h_warn;
+
+  const datasets = [
+    {
+      label: 'C+ (dérive hausse)',
+      data:  d.cusum_pos,
+      borderColor: COLORS[sensor].pos,
+      backgroundColor: COLORS[sensor].pos + '18',
+      tension: 0.2, pointRadius: 1.5, fill: true,
+    },
+    {
+      label: 'C− (dérive baisse)',
+      data:  d.cusum_neg,
+      borderColor: COLORS[sensor].neg,
+      backgroundColor: COLORS[sensor].neg + '18',
+      tension: 0.2, pointRadius: 1.5, fill: true,
+    },
+  ];
+
+  if (h) {
+    // Seuil CRITICAL
+    datasets.push({
+      label: 'h (CRITICAL)',
+      data: Array(n).fill(h),
+      borderColor: '#e74c3c', borderDash: [6, 3],
+      borderWidth: 1.5, pointRadius: 0, fill: false,
+    });
+    // Seuil WARNING
+    datasets.push({
+      label: 'h/2 (WARNING)',
+      data: Array(n).fill(h_warn),
+      borderColor: '#f39c12', borderDash: [4, 4],
+      borderWidth: 1.5, pointRadius: 0, fill: false,
+    });
+  }
+
+  new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${parseFloat(ctx.parsed.y).toFixed(3)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Lecture (idx)' },
+          ticks: { maxTicksLimit: 15 },
+        },
+        y: {
+          title: { display: true, text: 'Accumulateur CUSUM' },
+          min: 0,
+        },
+      },
+    },
+  });
+});
+</script>
+{% endblock %}

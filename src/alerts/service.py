@@ -248,6 +248,40 @@ class AlertService:
             return True
         return False
 
+    # ------------------------------------------------------------------
+    # Snooze
+    # ------------------------------------------------------------------
+
+    def snooze(self, alert_id: int, minutes: int = 30) -> Alert | None:
+        """Met en sourdine une alerte pendant N minutes."""
+        alert = self.get_by_id(alert_id)
+        if alert:
+            alert.snoozed_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+            self.db.commit()
+            self.db.refresh(alert)
+            self._audit("snooze", alert_id, f"Alerte #{alert_id} snoozée {minutes} min")
+        return alert
+
+    def unsnooze(self, alert_id: int) -> Alert | None:
+        """Annule le snooze d'une alerte."""
+        alert = self.get_by_id(alert_id)
+        if alert:
+            alert.snoozed_until = None
+            self.db.commit()
+            self.db.refresh(alert)
+            self._audit("unsnooze", alert_id, f"Snooze annulé pour #{alert_id}")
+        return alert
+
+    @staticmethod
+    def is_snoozed(alert: Alert) -> bool:
+        """Retourne True si l'alerte est actuellement snoozée."""
+        if not alert.snoozed_until:
+            return False
+        su = alert.snoozed_until
+        if su.tzinfo is None:
+            su = su.replace(tzinfo=timezone.utc)
+        return su > datetime.now(timezone.utc)
+
     def delete_bulk(self, ids: list[int]) -> int:
         """Supprime plusieurs alertes. Retourne le nombre supprimé."""
         for aid in ids:
@@ -386,6 +420,105 @@ class AlertService:
                             pass
 
     @staticmethod
+    def _pearson_correlation(x: list[float], y: list[float]) -> float:
+        """Calcule le coefficient de corrélation de Pearson entre deux séries."""
+        import numpy as np
+        if len(x) < 5 or len(x) != len(y):
+            return 0.0
+        try:
+            arr_x = np.array(x, dtype=float)
+            arr_y = np.array(y, dtype=float)
+            r = float(np.corrcoef(arr_x, arr_y)[0, 1])
+            return r if not (r != r) else 0.0  # guard NaN
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def check_composite_alert(db: Session, window_minutes: int = 2):
+        """
+        Crée une alerte composite CRITICAL si ≥2 capteurs ont des alertes simultanées.
+        Inclut la corrélation Pearson entre les séries de lectures des 60 derniers points.
+        """
+        cutoff  = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        sensors_with_alerts = (
+            db.query(Alert.sensor)
+            .filter(
+                Alert.created_at >= cutoff,
+                Alert.level.in_(["WARNING", "CRITICAL"]),
+                Alert.method.notin_(["storm", "composite", "offline"]),
+                Alert.resolved == False,  # noqa
+            )
+            .distinct()
+            .all()
+        )
+        active_sensors = [s[0] for s in sensors_with_alerts if s[0] not in ("système", "composite")]
+
+        if len(active_sensors) >= 2:
+            existing = db.query(Alert).filter(
+                Alert.method   == "composite",
+                Alert.resolved == False,  # noqa
+                Alert.created_at >= cutoff,
+            ).first()
+            if not existing:
+                # Calculer la corrélation Pearson entre les capteurs actifs
+                pearson_info = ""
+                try:
+                    bucket_size = timedelta(seconds=5)
+                    since_60 = datetime.now(timezone.utc) - timedelta(minutes=5)
+                    readings_by_sensor: dict[str, list[float]] = {}
+                    for s in active_sensors:
+                        logs = (
+                            db.query(SensorLog)
+                            .filter(SensorLog.sensor == s, SensorLog.created_at >= since_60)
+                            .order_by(SensorLog.created_at)
+                            .limit(60)
+                            .all()
+                        )
+                        readings_by_sensor[s] = [l.value for l in logs]
+                    # Aligner au minimum commun
+                    min_len = min(len(v) for v in readings_by_sensor.values()) if readings_by_sensor else 0
+                    if min_len >= 5 and len(active_sensors) >= 2:
+                        s1, s2 = active_sensors[0], active_sensors[1]
+                        r = AlertService._pearson_correlation(
+                            readings_by_sensor[s1][-min_len:],
+                            readings_by_sensor[s2][-min_len:],
+                        )
+                        if abs(r) > 0.7:
+                            pearson_info = f" (r={r:.2f})"
+                except Exception:
+                    pass
+
+                composite = Alert(
+                    sensor="composite",
+                    value=float(len(active_sensors)),
+                    unit="capteurs",
+                    level="CRITICAL",
+                    method="composite",
+                    reason=(
+                        f"Corrélation multi-capteurs détectée{pearson_info} : "
+                        f"{', '.join(active_sensors)} en anomalie simultanée"
+                    ),
+                )
+                db.add(composite)
+                db.commit()
+                db.refresh(composite)
+                try:
+                    from .notifier import notify as webhook_notify
+                    webhook_notify(composite.to_dict())
+                except Exception:
+                    pass
+                try:
+                    from .email_notifier import notify as email_notify
+                    email_notify(composite.to_dict())
+                except Exception:
+                    pass
+                try:
+                    from .telegram_notifier import notify as telegram_notify
+                    telegram_notify(composite.to_dict())
+                except Exception:
+                    pass
+
+    @staticmethod
     def check_storm_alert(db: Session, threshold: int = 5, window_minutes: int = 2):
         """
         Crée une alerte CRITICAL 'tempête' si >= threshold alertes
@@ -427,25 +560,95 @@ class AlertService:
 
     @staticmethod
     def check_escalation(db: Session, escalation_minutes: int = 10):
-        """Re-notifie si une alerte CRITICAL n'est pas acquittée depuis N minutes."""
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=escalation_minutes)
-        unacked = db.query(Alert).filter(
+        """
+        Escalade automatique :
+        1. Upgrade WARNING non-acquitté depuis N minutes → CRITICAL
+        2. Re-notifie les CRITICAL non-acquittés
+        Les paramètres sont surchargés par escalation_config.json si présent.
+        """
+        import json, os
+        _cfg_path = os.path.join(os.getcwd(), "escalation_config.json")
+        try:
+            with open(_cfg_path) as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
+        if not cfg.get("active", True):
+            return
+        delay = cfg.get("delay_minutes", escalation_minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=delay)
+
+        # ── Étape 1 : WARNING non-ack depuis N minutes → CRITICAL ─────────
+        warnings = db.query(Alert).filter(
+            Alert.level        == "WARNING",
+            Alert.acknowledged == False,  # noqa
+            Alert.resolved     == False,  # noqa
+            Alert.escalated_at == None,   # noqa — pas encore escaladé
+            Alert.created_at   <= cutoff,
+        ).all()
+
+        for alert in warnings:
+            alert.level       = "CRITICAL"
+            alert.escalated_at = datetime.now(timezone.utc)
+            alert.reason      = "[ESCALADE] " + alert.reason
+            try:
+                db.add(AuditLog(
+                    action="escalate",
+                    alert_id=alert.id,
+                    details=f"WARNING escaladé en CRITICAL après {delay} min sans acquittement",
+                ))
+                db.commit()
+            except Exception:
+                db.rollback()
+
+            _d = alert.to_dict()
+            if cfg.get("notify_webhook", True):
+                try:
+                    from .notifier import notify as webhook_notify
+                    webhook_notify({**_d, "escalation": True})
+                except Exception:
+                    pass
+            if cfg.get("notify_telegram", True):
+                try:
+                    from .telegram_notifier import notify as telegram_notify
+                    telegram_notify(_d)
+                except Exception:
+                    pass
+            if cfg.get("notify_email", False):
+                try:
+                    from .email_notifier import notify as email_notify
+                    email_notify(_d)
+                except Exception:
+                    pass
+
+        # ── Étape 2 : Re-notifier les CRITICAL persistants non-ack ────────
+        criticals = db.query(Alert).filter(
             Alert.level        == "CRITICAL",
             Alert.acknowledged == False,  # noqa
             Alert.resolved     == False,  # noqa
             Alert.created_at   <= cutoff,
         ).all()
-        for alert in unacked:
-            try:
-                from .notifier import notify as webhook_notify
-                webhook_notify({**alert.to_dict(), "escalation": True})
-            except Exception:
-                pass
-            try:
-                from .email_notifier import notify as email_notify
-                email_notify(alert.to_dict())
-            except Exception:
-                pass
+        for alert in criticals:
+            _d = alert.to_dict()
+            if cfg.get("notify_webhook", True):
+                try:
+                    from .notifier import notify as webhook_notify
+                    webhook_notify({**_d, "escalation": True})
+                except Exception:
+                    pass
+            if cfg.get("notify_telegram", True):
+                try:
+                    from .telegram_notifier import notify as telegram_notify
+                    telegram_notify(_d)
+                except Exception:
+                    pass
+            if cfg.get("notify_email", False):
+                try:
+                    from .email_notifier import notify as email_notify
+                    email_notify(_d)
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Audit
@@ -625,7 +828,7 @@ class AlertService:
         self.db.add(alert)
         self.db.commit()
         self.db.refresh(alert)
-        # Notifications (webhook + email) si CRITICAL
+        # Notifications (webhook + email + telegram + mqtt)
         try:
             from .notifier import notify as webhook_notify
             webhook_notify(alert.to_dict())
@@ -634,6 +837,16 @@ class AlertService:
         try:
             from .email_notifier import notify as email_notify
             email_notify(alert.to_dict())
+        except Exception:
+            pass
+        try:
+            from .telegram_notifier import notify as telegram_notify
+            telegram_notify(alert.to_dict())
+        except Exception:
+            pass
+        try:
+            from .mqtt_publisher import publish_alert as mqtt_publish
+            mqtt_publish(alert.to_dict())
         except Exception:
             pass
         return alert

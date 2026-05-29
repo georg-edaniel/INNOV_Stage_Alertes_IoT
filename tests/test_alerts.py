@@ -143,10 +143,12 @@ class TestAlertService:
 
 @pytest.fixture
 def client(db):
-    """Client de test avec base de données isolée."""
+    """Client de test avec base de données isolée et auth désactivée."""
+    from unittest.mock import patch
     app.dependency_overrides[get_db] = lambda: db
-    with TestClient(app) as c:
-        yield c
+    with patch("src.api.auth.is_auth_enabled", return_value=False):
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
     app.dependency_overrides.clear()
 
 

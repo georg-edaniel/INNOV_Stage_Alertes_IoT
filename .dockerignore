@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environnements virtuels
+venv/
+.venv/
+env/
+.env/
+
+# Données et modèles (montés via volumes)
+alerts.db
+if_model.pkl
+htmlcov/
+
+# Tests et couverture
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Éditeurs et IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation et notebooks
+notebooks/
+*.md
+*.pdf
+*.docx
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

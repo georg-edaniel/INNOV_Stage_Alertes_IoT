@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..alerts.database import init_db
 from ..simulator.scheduler import SimulatorScheduler
+from ..detection.statistical import IsolationForestDetector
 from .routers import (
     alerts_router, logs_router, sensors_router,
     simulator_router, config_router, ingest_router,
@@ -21,12 +22,15 @@ from .routers import (
 from .dashboard import dashboard_router
 from .stream import stream_router, push_tick
 from .auth import auth_router, require_auth
+from .metrics import metrics_router
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).parent.parent / "dashboard" / "static"
+STATIC_DIR    = Path(__file__).parent.parent / "dashboard" / "static"
+IF_MODEL_PATH = Path(__file__).parent.parent.parent / "if_model.pkl"
 
-_scheduler: SimulatorScheduler | None = None
+_scheduler:        SimulatorScheduler    | None = None
+_iforest_detector: IsolationForestDetector | None = None
 
 
 def get_scheduler() -> SimulatorScheduler | None:
@@ -34,11 +38,36 @@ def get_scheduler() -> SimulatorScheduler | None:
     return _scheduler
 
 
+def get_iforest_detector() -> IsolationForestDetector | None:
+    """Retourne le détecteur Isolation Forest persisté (chargé au démarrage)."""
+    return _iforest_detector
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _scheduler
+    global _scheduler, _iforest_detector
 
     init_db()
+
+    # Chargement/création du détecteur Isolation Forest persisté
+    if IF_MODEL_PATH.exists():
+        try:
+            _iforest_detector = IsolationForestDetector.load_from(str(IF_MODEL_PATH))
+            logger.info(f"Modèle IF chargé depuis {IF_MODEL_PATH}")
+        except Exception as e:
+            logger.warning(f"Impossible de charger le modèle IF ({e}) — démarrage à froid")
+            _iforest_detector = IsolationForestDetector()
+    else:
+        _iforest_detector = IsolationForestDetector()
+        logger.info("Nouveau modèle IF créé (aucun fichier existant)")
+
+    # Initialisation MQTT (si configuré)
+    try:
+        from ..alerts.mqtt_publisher import init_publisher
+        init_publisher()
+        logger.info("MQTT publisher initialisé")
+    except Exception as e:
+        logger.warning(f"MQTT publisher non disponible : {e}")
 
     from ..alerts.database import SessionLocal
     _scheduler = SimulatorScheduler(
@@ -55,6 +84,21 @@ async def lifespan(app: FastAPI):
     if _scheduler:
         _scheduler.stop()
         logger.info("Simulateur IoT arrêté.")
+
+    if _iforest_detector:
+        try:
+            _iforest_detector.save(str(IF_MODEL_PATH))
+            logger.info(f"Modèle IF sauvegardé dans {IF_MODEL_PATH}")
+        except Exception as e:
+            logger.warning(f"Impossible de sauvegarder le modèle IF : {e}")
+
+    # Fermeture MQTT
+    try:
+        from ..alerts.mqtt_publisher import shutdown_publisher
+        shutdown_publisher()
+        logger.info("MQTT publisher arrêté")
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -82,7 +126,7 @@ async def auth_middleware(request: Request, call_next):
     """Redirige vers /login si l'auth est activée et l'utilisateur non connecté."""
     path = request.url.path
     # Routes publiques (pas besoin d'authentification)
-    public = {"/login", "/static", "/health"}
+    public = {"/login", "/mfa", "/static", "/health", "/metrics", "/auth/google"}
     if any(path.startswith(p) for p in public) or path == "/favicon.ico":
         return await call_next(request)
     # Vérifier l'authentification
@@ -100,6 +144,7 @@ app.include_router(sensors_router,     prefix="/api/sensors",    tags=["Capteurs
 app.include_router(simulator_router,   prefix="/api/simulator",  tags=["Simulateur"])
 app.include_router(config_router,      prefix="/api/config",     tags=["Configuration"])
 app.include_router(ingest_router,      prefix="/api/ingest",     tags=["Ingest externe"])
+app.include_router(metrics_router,                                tags=["Metrics"])
 
 
 @app.get("/health", tags=["Health"])

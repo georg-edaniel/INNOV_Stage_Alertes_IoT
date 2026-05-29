@@ -8,10 +8,13 @@
 {% endblock %}
 
 {% block content %}
-<h1 class="page-title">🗺 Carte des capteurs IoT</h1>
+<div class="page-header">
+  <h1 class="page-title">🗺 Carte des capteurs IoT</h1>
+  <p class="page-subtitle">Localisation GPS des capteurs · Mise à jour toutes les 10 secondes</p>
+</div>
 
 <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
-  <div style="font-size:.88rem;color:var(--muted);">Mise à jour automatique toutes les 10 secondes.</div>
+  <div style="font-size:.88rem;color:var(--muted);"></div>
   <div style="display:flex;gap:.8rem;align-items:center;font-size:.82rem;">
     <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#27ae60;display:inline-block;"></span> Normal</span>
     <span style="display:flex;align-items:center;gap:.3rem;"><span style="width:12px;height:12px;border-radius:50%;background:#f39c12;display:inline-block;"></span> Warning</span>

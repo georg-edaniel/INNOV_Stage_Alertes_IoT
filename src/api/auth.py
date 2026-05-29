@@ -8,10 +8,13 @@ Credentials stockés dans auth_config.json (mot de passe hashé SHA-256).
 import json
 import hashlib
 import secrets
+import logging
 from pathlib import Path
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 
 CONFIG_FILE = Path(__file__).parent.parent.parent / "auth_config.json"
 TEMPLATES_DIR = Path(__file__).parent.parent / "dashboard" / "templates"
@@ -106,6 +109,14 @@ def login_submit(
         role = cfg.get("default_role", "admin")
 
     if role is not None:
+        # Vérifier si MFA requis
+        if _is_mfa_required(username):
+            pending = secrets.token_hex(32)
+            _pending_mfa[pending] = {"user": username, "role": role}
+            response = RedirectResponse(url="/mfa", status_code=303)
+            response.set_cookie("mfa_pending", pending, httponly=True, samesite="lax", max_age=300)
+            return response
+
         token = secrets.token_hex(32)
         _sessions[token] = {"user": username, "role": role}
         response = RedirectResponse(url="/", status_code=303)
@@ -128,6 +139,118 @@ def logout(request: Request):
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("session_token")
     return response
+
+
+# ── MFA TOTP ────────────────────────────────────────────────────
+
+# Sessions MFA en attente : { pending_token: { "user": str, "role": str } }
+_pending_mfa: dict[str, dict] = {}
+
+
+def _get_totp_secret(username: str) -> str | None:
+    """Retourne le secret TOTP d'un utilisateur, ou None si pas configuré."""
+    cfg = _load_config()
+    users = cfg.get("users", {})
+    if username in users:
+        return users[username].get("totp_secret")
+    if username == cfg.get("username"):
+        return cfg.get("totp_secret")
+    return None
+
+
+def _is_mfa_required(username: str) -> bool:
+    """Vérifie si le MFA est requis pour cet utilisateur."""
+    return _get_totp_secret(username) is not None
+
+
+@auth_router.get("/mfa", response_class=HTMLResponse)
+def mfa_page(request: Request, setup: str = ""):
+    """Page de vérification (ou configuration) MFA."""
+    setup_mode = setup == "1"
+    ctx = {"error": "", "setup_mode": setup_mode, "qr_uri": None, "totp_secret": None}
+
+    if setup_mode:
+        # Générer un nouveau secret pour la configuration initiale
+        try:
+            import pyotp
+            secret = pyotp.random_base32()
+            user = get_current_user(request) or "admin"
+            totp = pyotp.TOTP(secret)
+            provisioning = totp.provisioning_uri(user, issuer_name="INNOV IoT Alert")
+            try:
+                import qrcode
+                import io
+                import base64
+                qr = qrcode.make(provisioning)
+                buf = io.BytesIO()
+                qr.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                ctx["qr_uri"] = f"data:image/png;base64,{b64}"
+            except ImportError:
+                pass
+            ctx["totp_secret"] = secret
+            # Stocker temporairement en session pour la vérification
+            token = request.cookies.get("session_token")
+            if token and token in _sessions:
+                _sessions[token]["pending_totp_secret"] = secret
+        except ImportError:
+            ctx["error"] = "pyotp non installé — MFA indisponible"
+
+    return templates.TemplateResponse(request, "mfa.html", ctx)
+
+
+@auth_router.post("/mfa/verify")
+def mfa_verify(request: Request, code: str = Form(...)):
+    """Vérifie le code TOTP soumis."""
+    pending_token = request.cookies.get("mfa_pending")
+    if not pending_token or pending_token not in _pending_mfa:
+        return RedirectResponse(url="/login?error=session_expired", status_code=303)
+
+    data = _pending_mfa[pending_token]
+    secret = _get_totp_secret(data["user"])
+    if not secret:
+        # Pas de secret → valider sans TOTP (fallback)
+        pass
+    else:
+        try:
+            import pyotp
+            totp = pyotp.TOTP(secret)
+            if not totp.verify(code.strip(), valid_window=1):
+                return templates.TemplateResponse(request, "mfa.html", {
+                    "error": "Code invalide. Réessayez.",
+                    "setup_mode": False,
+                    "qr_uri": None,
+                    "totp_secret": None,
+                })
+        except ImportError:
+            logger.warning("pyotp non disponible — MFA bypassé")
+
+    # MFA validé → créer session
+    session_token = secrets.token_hex(32)
+    _sessions[session_token] = {"user": data["user"], "role": data["role"]}
+    del _pending_mfa[pending_token]
+
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie("session_token", session_token, httponly=True, samesite="lax", max_age=86400 * 7)
+    response.delete_cookie("mfa_pending")
+    return response
+
+
+@auth_router.post("/mfa/setup")
+def mfa_setup(request: Request, secret: str = Form(...)):
+    """Sauvegarde le secret TOTP pour l'utilisateur courant."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    cfg = _load_config()
+    if user == cfg.get("username"):
+        cfg["totp_secret"] = secret
+    elif user in cfg.get("users", {}):
+        cfg["users"][user]["totp_secret"] = secret
+    else:
+        pass
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    return RedirectResponse(url="/?totp_saved=1", status_code=303)
 
 
 def get_auth_config() -> dict:

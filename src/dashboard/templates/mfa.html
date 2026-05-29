@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vérification MFA — INNOV IoT</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg,#f0f4f8); }
+    .mfa-box { background:var(--card-bg,#fff); border:1px solid var(--border); border-radius:16px; padding:2rem 2.5rem; width:100%; max-width:380px; box-shadow:0 8px 32px rgba(0,0,0,.12); text-align:center; }
+    .mfa-icon { font-size:2.5rem; margin-bottom:1rem; }
+    .mfa-title { font-size:1.25rem; font-weight:700; margin-bottom:.4rem; }
+    .mfa-subtitle { font-size:.85rem; color:var(--muted,#6b7280); margin-bottom:1.5rem; }
+    .mfa-input { width:100%; padding:.75rem 1rem; font-size:1.5rem; text-align:center; letter-spacing:.4em; border:2px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-family:monospace; }
+    .mfa-input:focus { border-color:#1a5c9c; outline:none; }
+    .btn-verify { width:100%; margin-top:1rem; padding:.75rem; font-size:1rem; font-weight:600; background:#1a5c9c; color:#fff; border:none; border-radius:8px; cursor:pointer; }
+    .btn-verify:hover { background:#134a7a; }
+    .error-msg { color:#e74c3c; font-size:.85rem; margin-top:.7rem; }
+    .back-link { display:block; margin-top:1rem; font-size:.82rem; color:var(--muted,#6b7280); text-decoration:none; }
+    .back-link:hover { color:#1a5c9c; }
+    .setup-section { margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--border); }
+    .qr-placeholder { background:var(--bg-alt,#f8f8f8); border:1px dashed var(--border); border-radius:8px; padding:1rem; margin-bottom:1rem; font-size:.83rem; color:var(--muted,#999); }
+  </style>
+</head>
+<body>
+<div class="mfa-box">
+  <div class="mfa-icon">🔐</div>
+  <div class="mfa-title">Vérification à deux facteurs</div>
+  <div class="mfa-subtitle">Entrez le code à 6 chiffres de votre application TOTP (Google Authenticator, Authy…)</div>
+
+  <form method="post" action="/mfa/verify">
+    <input
+      class="mfa-input"
+      type="text"
+      name="code"
+      maxlength="6"
+      minlength="6"
+      pattern="[0-9]{6}"
+      placeholder="000000"
+      autofocus
+      autocomplete="one-time-code"
+      inputmode="numeric"
+    >
+    {% if error %}
+    <div class="error-msg">{{ error }}</div>
+    {% endif %}
+    <button type="submit" class="btn-verify">Vérifier →</button>
+  </form>
+
+  {% if setup_mode %}
+  <div class="setup-section">
+    <p style="font-size:.83rem;margin-bottom:.8rem;color:var(--text);">
+      <strong>Configuration initiale :</strong> scannez ce QR code avec votre application TOTP
+    </p>
+    {% if qr_uri %}
+    <div style="display:flex;justify-content:center;margin-bottom:.8rem;">
+      <img src="{{ qr_uri }}" alt="QR Code TOTP" style="width:160px;height:160px;border:2px solid var(--border);border-radius:8px;">
+    </div>
+    {% else %}
+    <div class="qr-placeholder">QR Code non disponible — installez <code>qrcode[pil]</code></div>
+    {% endif %}
+    {% if totp_secret %}
+    <p style="font-size:.78rem;color:var(--muted,#999);">
+      Clé manuelle : <code style="font-size:.82rem;font-weight:700;">{{ totp_secret }}</code>
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <a href="/login" class="back-link">← Retour à la connexion</a>
+</div>
+</body>
+</html>

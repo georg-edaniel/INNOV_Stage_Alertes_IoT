@@ -286,3 +286,159 @@ class IsolationForestDetector:
             self._windows[s].clear()
             self._models.pop(s, None)
             self._counts[s] = 0
+
+    def save(self, path: str) -> None:
+        """Sérialise l'état complet du détecteur (modèles + fenêtres) sur disque."""
+        import joblib
+        state = {
+            "models":  self._models,
+            "windows": {s: list(w) for s, w in self._windows.items()},
+            "counts":  dict(self._counts),
+        }
+        joblib.dump(state, path)
+
+    @classmethod
+    def load_from(cls, path: str, **init_kwargs) -> "IsolationForestDetector":
+        """Charge un détecteur précédemment sauvegardé."""
+        import joblib
+        state = joblib.load(path)
+        obj = cls(**init_kwargs)
+        obj._models = state["models"]
+        for s, vals in state["windows"].items():
+            if s in obj._windows:
+                obj._windows[s].extend(vals)
+        obj._counts = state["counts"]
+        return obj
+
+
+class MultivariateIsolationForestDetector:
+    """
+    Isolation Forest multivarié : analyse simultanément les 3 capteurs
+    (température, turbidité, pH) comme un vecteur de features.
+
+    Détecte les corrélations anormales entre capteurs (ex : pH et turbidité
+    qui dérivent ensemble) que les détecteurs univariés peuvent manquer.
+
+    Paramètres :
+        window_size   : taille de la fenêtre de vecteurs (défaut 100)
+        min_samples   : nb de vecteurs avant activation (défaut 30)
+        contamination : proportion d'anomalies attendue (défaut 0.05)
+        retrain_every : réentraîne tous les N vecteurs (défaut 20)
+    """
+
+    SENSORS = ["temperature", "turbidity", "ph"]
+
+    def __init__(
+        self,
+        window_size:   int   = 100,
+        min_samples:   int   = 30,
+        contamination: float = 0.05,
+        retrain_every: int   = 20,
+    ):
+        self.window_size   = window_size
+        self.min_samples   = min_samples
+        self.contamination = contamination
+        self.retrain_every = retrain_every
+        self._latest: dict[str, float | None] = {s: None for s in self.SENSORS}
+        self._window: deque = deque(maxlen=window_size)
+        self._model: IsolationForest | None = None
+        self._count = 0
+
+    def _train(self) -> None:
+        arr = np.array(list(self._window))
+        model = IsolationForest(
+            n_estimators  = 100,
+            contamination = self.contamination,
+            random_state  = 42,
+            n_jobs        = 1,
+        )
+        model.fit(arr)
+        self._model = model
+
+    def analyze(self, reading: SensorReading) -> DetectionResult:
+        if reading.sensor not in self.SENSORS:
+            cfg = SENSOR_CONFIG.get(reading.sensor, {"unit": ""})
+            return DetectionResult(
+                sensor    = reading.sensor,
+                value     = reading.value,
+                unit      = cfg.get("unit", ""),
+                level     = AlertLevel.NORMAL,
+                method    = "mv_isolation_forest",
+                reason    = "Capteur hors périmètre multivarié",
+                timestamp = reading.timestamp,
+            )
+
+        cfg = SENSOR_CONFIG[reading.sensor]
+        self._latest[reading.sensor] = reading.value
+
+        # Attendre que tous les capteurs aient au moins une valeur
+        if any(v is None for v in self._latest.values()):
+            n_ready = sum(v is not None for v in self._latest.values())
+            return DetectionResult(
+                sensor    = reading.sensor,
+                value     = reading.value,
+                unit      = cfg["unit"],
+                level     = AlertLevel.NORMAL,
+                method    = "mv_isolation_forest",
+                reason    = f"Initialisation multivariée ({n_ready}/{len(self.SENSORS)} capteurs)",
+                timestamp = reading.timestamp,
+            )
+
+        vec = [self._latest[s] for s in self.SENSORS]
+        self._window.append(vec)
+        self._count += 1
+
+        if len(self._window) < self.min_samples:
+            return DetectionResult(
+                sensor    = reading.sensor,
+                value     = reading.value,
+                unit      = cfg["unit"],
+                level     = AlertLevel.NORMAL,
+                method    = "mv_isolation_forest",
+                reason    = f"Warmup multivarié ({len(self._window)}/{self.min_samples} vecteurs)",
+                timestamp = reading.timestamp,
+            )
+
+        if self._model is None or self._count % self.retrain_every == 0:
+            self._train()
+
+        x     = np.array([vec])
+        score = float(self._model.decision_function(x)[0])
+        pred  = int(self._model.predict(x)[0])
+
+        if pred == -1:
+            if score < -0.1:
+                level  = AlertLevel.CRITICAL
+                reason = (
+                    f"MV-IF : anomalie multivariée critique (score={score:.3f}) "
+                    f"— {reading.sensor}={reading.value} {cfg['unit']}"
+                )
+            else:
+                level  = AlertLevel.WARNING
+                reason = (
+                    f"MV-IF : anomalie multivariée (score={score:.3f}) "
+                    f"— {reading.sensor}={reading.value} {cfg['unit']}"
+                )
+        else:
+            level  = AlertLevel.NORMAL
+            reason = (
+                f"MV-IF : normal multivarié (score={score:.3f}) "
+                f"— {reading.sensor}={reading.value} {cfg['unit']}"
+            )
+
+        return DetectionResult(
+            sensor    = reading.sensor,
+            value     = reading.value,
+            unit      = cfg["unit"],
+            level     = level,
+            method    = "mv_isolation_forest",
+            reason    = reason,
+            timestamp = reading.timestamp,
+        )
+
+    def reset(self) -> None:
+        """Réinitialise l'état du détecteur multivarié."""
+        self._latest = {s: None for s in self.SENSORS}
+        self._window.clear()
+        self._model  = None
+        self._count  = 0

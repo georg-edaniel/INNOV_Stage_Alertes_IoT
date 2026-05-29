@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% set active = "timeline" %}
+{% block title %}Timeline des Alertes{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">🕐 Timeline des Anomalies</h1>
+  <p class="page-subtitle">Vue chronologique des {{ alerts|length }} dernières alertes</p>
+</div>
+
+<!-- Filtres -->
+<div class="card" style="padding:1rem;margin-bottom:1rem;">
+  <form method="get" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.25rem;color:#666;">Capteur</label>
+      <select name="sensor" style="padding:.4rem .7rem;border:1px solid #ddd;border-radius:6px;font-size:.9rem;">
+        <option value="">Tous</option>
+        {% for s in ["temperature","turbidity","ph"] %}
+        <option value="{{ s }}" {% if sensor==s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.25rem;color:#666;">Depuis</label>
+      <input type="date" name="date_from" value="{{ date_from }}"
+        style="padding:.4rem .7rem;border:1px solid #ddd;border-radius:6px;font-size:.9rem;">
+    </div>
+    <div>
+      <label style="display:block;font-size:.8rem;margin-bottom:.25rem;color:#666;">Jusqu'au</label>
+      <input type="date" name="date_to" value="{{ date_to }}"
+        style="padding:.4rem .7rem;border:1px solid #ddd;border-radius:6px;font-size:.9rem;">
+    </div>
+    <button type="submit" class="btn btn-primary">Filtrer</button>
+    <a href="/timeline" class="btn btn-secondary">Réinitialiser</a>
+  </form>
+</div>
+
+<!-- Densité horaire -->
+{% if hourly %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3 style="margin:0;">Densité horaire des alertes</h3></div>
+  <div style="position:relative;height:220px;padding:.5rem 0;">
+    <canvas id="hourly-chart"></canvas>
+  </div>
+</div>
+{% endif %}
+
+<!-- Scatter plot (scatter par heure) -->
+{% if alerts %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3 style="margin:0;">Répartition temporelle</h3></div>
+  <div style="position:relative;height:280px;padding:.5rem 0;">
+    <canvas id="scatter-chart"></canvas>
+  </div>
+</div>
+{% endif %}
+
+<!-- Liste chronologique -->
+<div class="card">
+  <div class="card-header">
+    <h3 style="margin:0;">Liste chronologique ({{ alerts|length }} alertes)</h3>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Horodatage</th>
+          <th>Capteur</th>
+          <th>Niveau</th>
+          <th>Valeur</th>
+          <th>Méthode</th>
+          <th>Raison</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in alerts %}
+        <tr>
+          <td style="white-space:nowrap;font-size:.82rem;color:#666;">
+            {{ a.created_at[:19].replace('T',' ') if a.created_at else '—' }}
+          </td>
+          <td><strong>{{ a.sensor }}</strong></td>
+          <td>
+            <span class="badge badge-{{ a.level|lower }}">{{ a.level }}</span>
+          </td>
+          <td>{{ a.value }} {{ a.unit }}</td>
+          <td style="font-size:.82rem;color:#888;">{{ a.method }}</td>
+          <td style="font-size:.82rem;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.reason }}</td>
+          <td><a href="/alerts/{{ a.id }}" class="btn btn-secondary" style="padding:.2rem .5rem;font-size:.78rem;">Détail</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="text-align:center;color:#999;padding:2rem;">Aucune alerte trouvée</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const hourlyData = {{ hourly | tojson }};
+const alertsData = {{ alerts | tojson }};
+
+// Graphique densité horaire
+if (hourlyData.length > 0 && document.getElementById('hourly-chart')) {
+  const labels   = hourlyData.map(h => h.hour.slice(11, 16)); // HH:00
+  const critical = hourlyData.map(h => h.CRITICAL || 0);
+  const warning  = hourlyData.map(h => h.WARNING  || 0);
+
+  new Chart(document.getElementById('hourly-chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'CRITICAL', data: critical, backgroundColor: '#e74c3c99', borderColor: '#e74c3c', borderWidth: 1 },
+        { label: 'WARNING',  data: warning,  backgroundColor: '#f39c1299', borderColor: '#f39c12', borderWidth: 1 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        x: { stacked: true, ticks: { maxTicksLimit: 20 } },
+        y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+      }
+    }
+  });
+}
+
+// Scatter plot
+if (alertsData.length > 0 && document.getElementById('scatter-chart')) {
+  const SENSOR_Y = { temperature: 3, turbidity: 2, ph: 1 };
+  const COLOR    = { CRITICAL: '#e74c3c', WARNING: '#f39c12', NORMAL: '#27ae60' };
+
+  const byLevel = { CRITICAL: [], WARNING: [], NORMAL: [] };
+  alertsData.forEach(a => {
+    const ts = new Date(a.created_at).getTime();
+    if (!isNaN(ts)) {
+      byLevel[a.level] = byLevel[a.level] || [];
+      byLevel[a.level].push({ x: ts, y: SENSOR_Y[a.sensor] || 0.5 });
+    }
+  });
+
+  new Chart(document.getElementById('scatter-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: Object.entries(byLevel)
+        .filter(([, pts]) => pts.length > 0)
+        .map(([level, pts]) => ({
+          label: level,
+          data: pts,
+          backgroundColor: COLOR[level] + 'bb',
+          borderColor: COLOR[level],
+          pointRadius: 6,
+        }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: {
+            callback: v => new Date(v).toLocaleDateString('fr-CA'),
+            maxTicksLimit: 10,
+          }
+        },
+        y: {
+          ticks: {
+            callback: v => ({3:'Température', 2:'Turbidité', 1:'pH'})[v] || '',
+            stepSize: 1,
+          },
+          min: 0, max: 4,
+        }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

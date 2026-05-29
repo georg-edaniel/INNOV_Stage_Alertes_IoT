@@ -38,21 +38,33 @@
       <div id="search-results" onmousedown="event.preventDefault()" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2d3d;border:1px solid rgba(255,255,255,.15);border-radius:6px;max-height:280px;overflow-y:auto;z-index:999;box-shadow:0 8px 24px rgba(0,0,0,.4);"></div>
     </div>
 
-    <div class="nav-section">Navigation</div>
-    <a href="/"            class="nav-item {% if active=='dashboard'   %}active{% endif %}">📊 Dashboard</a>
-    <a href="/alerts"      class="nav-item {% if active=='alerts'      %}active{% endif %}">🔔 Alertes</a>
-    <a href="/logs"         class="nav-item {% if active=='logs'        %}active{% endif %}">📋 Historique</a>
-    <a href="/logs/compare" class="nav-item {% if active=='compare'     %}active{% endif %}" style="font-size:.82rem;padding-left:1.8rem;">↳ Comparer</a>
-    <a href="/report"      class="nav-item {% if active=='report'      %}active{% endif %}">📄 Rapport</a>
-    <a href="/params"      class="nav-item {% if active=='params'      %}active{% endif %}">⚙️ Paramètres</a>
-    <a href="/config"      class="nav-item {% if active=='config'      %}active{% endif %}" style="font-size:.82rem;padding-left:1.8rem;">↳ Seuils</a>
-    <a href="/audit"       class="nav-item {% if active=='audit'       %}active{% endif %}">🛡 Audit</a>
-    <a href="/archived"    class="nav-item {% if active=='archived'    %}active{% endif %}">📦 Archives</a>
-    <a href="/presentation" class="nav-item" target="_blank">🖥 Présentation</a>
-    <a href="/map"          class="nav-item {% if active=='map'         %}active{% endif %}">🗺 Carte</a>
+    <div class="nav-section">Surveillance</div>
+    <a href="/"         class="nav-item {% if active=='dashboard' %}active{% endif %}">📊 Dashboard</a>
+    <a href="/alerts"   class="nav-item {% if active=='alerts'    %}active{% endif %}">🔔 Alertes</a>
+    <a href="/timeline" class="nav-item {% if active=='timeline'  %}active{% endif %}">📅 Timeline</a>
+    <a href="/map"      class="nav-item {% if active=='map'       %}active{% endif %}">🗺 Carte</a>
 
-    <div class="nav-section">API</div>
-    <a href="/docs" class="nav-item" target="_blank">📖 Swagger UI</a>
+    <div class="nav-section">Historique</div>
+    <a href="/logs"         class="nav-item {% if active=='logs'    %}active{% endif %}">📋 Lectures</a>
+    <a href="/logs/overlay" class="nav-item {% if active=='overlay' %}active{% endif %}" style="font-size:.82rem;padding-left:1.6rem;">↳ Overlay Z-Score</a>
+    <a href="/logs/compare" class="nav-item {% if active=='compare' %}active{% endif %}" style="font-size:.82rem;padding-left:1.6rem;">↳ Comparer</a>
+    <a href="/archived"     class="nav-item {% if active=='archived'%}active{% endif %}">📦 Archives</a>
+    <a href="/audit"        class="nav-item {% if active=='audit'   %}active{% endif %}">🛡 Journal audit</a>
+
+    <div class="nav-section">Analyse & ML</div>
+    <a href="/report"          class="nav-item {% if active=='report'         %}active{% endif %}">📄 Rapport</a>
+    <a href="/predict"         class="nav-item {% if active=='predict'        %}active{% endif %}">📈 Prédiction</a>
+    <a href="/spc"             class="nav-item {% if active=='spc'            %}active{% endif %}">📉 SPC Charts</a>
+    <a href="/cusum"           class="nav-item {% if active=='cusum'          %}active{% endif %}">〰 CUSUM</a>
+    <a href="/report/detection"class="nav-item {% if active=='detection_eval' %}active{% endif %}">🧪 Évaluation</a>
+
+    <div class="nav-section">Configuration</div>
+    <a href="/params" class="nav-item {% if active=='params' %}active{% endif %}">⚙️ Paramètres</a>
+    <a href="/config" class="nav-item {% if active=='config' %}active{% endif %}" style="font-size:.82rem;padding-left:1.6rem;">↳ Seuils capteurs</a>
+
+    <div class="nav-section">Outils</div>
+    <a href="/presentation" class="nav-item" target="_blank">🖥 Présentation</a>
+    <a href="/docs"         class="nav-item" target="_blank">📖 API Swagger</a>
 
     <div class="nav-section">Capteurs</div>
     <div class="sensor-health-list" id="sidebar-health">
@@ -76,6 +88,17 @@
       </button>
       <a href="/profile" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">👤 Mon profil</a>
       <a href="/logout" class="notif-btn" style="display:block;text-align:center;text-decoration:none;margin-top:.3rem;">🔓 Déconnexion</a>
+      <!-- Toggle langue FR/EN -->
+      <div style="display:flex;gap:.4rem;margin-top:.4rem;">
+        <button onclick="setLang('fr')" id="lang-fr-btn"
+          style="flex:1;padding:.3rem;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font-size:.8rem;">
+          🇫🇷 FR
+        </button>
+        <button onclick="setLang('en')" id="lang-en-btn"
+          style="flex:1;padding:.3rem;border-radius:5px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;cursor:pointer;font-size:.8rem;">
+          🇬🇧 EN
+        </button>
+      </div>
     </div>
   </nav>
 
@@ -464,6 +487,79 @@ function renderNotifHistory() {
       <div style="color:var(--muted,#999);">${n.body}</div>
     </div>`).join('');
 }
+</script>
+
+<script>
+// ── Toggle langue FR/EN ─────────────────────────────────────────
+async function setLang(lang) {
+  try {
+    await fetch(`/api/config/lang?lang=${lang}`, { method: 'POST' });
+    location.reload();
+  } catch(e) {
+    showToast('Erreur changement de langue', 'error');
+  }
+}
+
+// Marquer la langue active
+(function() {
+  const lang = document.cookie.match(/lang=([a-z]+)/)?.[1] || 'fr';
+  const btn = document.getElementById('lang-' + lang + '-btn');
+  if (btn) btn.style.background = 'rgba(255,255,255,.25)';
+})();
+
+// ── WebSocket temps réel (préféré au SSE) ───────────────────────
+(function() {
+  // On n'installe le WebSocket que si aucun SSE n'est actif dans cette page
+  // Chaque page peut choisir entre SSE (EventSource) et WS
+  if (window._wsInstalled) return;
+  window._wsInstalled = true;
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${location.host}/api/ws`;
+
+  let ws = null;
+  let wsRetries = 0;
+
+  function connectWS() {
+    if (wsRetries > 5) return; // arrêter après 5 tentatives
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => { wsRetries = 0; };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === 'tick') handleWSTick(data);
+        } catch(_) {}
+      };
+      ws.onclose = () => {
+        ws = null;
+        wsRetries++;
+        // Fallback SSE géré par la page elle-même
+      };
+      ws.onerror = () => { ws && ws.close(); };
+    } catch(_) {}
+  }
+
+  function handleWSTick(data) {
+    // Mettre à jour la santé des capteurs
+    if (data.sensor_health) updateHealthUI(data.sensor_health);
+    // Notifier si nouvelles alertes
+    if (data.alerts && data.alerts.length > 0) {
+      data.alerts.forEach(a => {
+        if (a.level === 'CRITICAL' || a.level === 'WARNING') {
+          sendNotification(
+            `${a.level} — ${a.sensor}`,
+            a.reason.slice(0, 100),
+            a.level
+          );
+        }
+      });
+    }
+  }
+
+  // Démarrer WS
+  connectWS();
+})();
 </script>
 
 {% block scripts %}{% endblock %}
